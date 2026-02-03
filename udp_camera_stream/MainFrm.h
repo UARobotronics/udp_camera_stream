@@ -52,17 +52,18 @@ private:
 	void loop();
 	void UpdateLayout();  // Helper to manage control positions
 
-	Color getBayerColor(size_t curCol, unsigned char data);
-	Color getYUVColor(size_t curCol, unsigned char data);
-	Color getColor(size_t curCol, unsigned char data);
+	inline Color getBayerColor(size_t curCol, unsigned char data);
+	inline Color getYUVColor(size_t curCol, unsigned char data);
+	inline Color getColor(size_t curCol, unsigned char data);
 
+	void addLogString(CString str);
 private:
 	CImage m_image;  // Member variable for the image
 	CListBox m_logList;  // Log list box
 
 	int m_width = 0;
 	int m_height = 0;
-	unsigned int m_curRow = 0;
+	uint16_t m_curRow = 0;
 	//PixelFormat m_pixelFormat = PixelFormat::BAYER_RGGB10;
 	PixelFormat m_pixelFormat = PixelFormat::YUV420;
 
@@ -75,7 +76,12 @@ private:
 	std::queue<std::vector<unsigned char>> m_frameQueue;
 	std::chrono::time_point<std::chrono::system_clock> m_lastPacketTimestamp{};
 	std::chrono::time_point<std::chrono::system_clock> m_startFPSTimestamp{};
+	std::chrono::time_point<std::chrono::system_clock> m_startGlobalFPSTimestamp{};
 
 	unsigned int m_frameCount = 0;
+	unsigned int m_globalFrameCount = 0;
+	unsigned int m_FPSTotalRowCount = 0;
+	//unsigned int m_colorBitShift = 2;
+	unsigned int m_colorBitShift = 0;
 };
 

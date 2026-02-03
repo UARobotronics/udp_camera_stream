@@ -1,8 +1,11 @@
 #include "pch.h"
+
 #include "framework.h"
 #include "MainFrm.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
+
+#include <limits>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -20,8 +23,10 @@ const unsigned int g_port = 8080;
 //const unsigned int g_defImageHeight = 990;
 //const unsigned int g_defImageWidth = 2028;
 //const unsigned int g_defImageHeight = 1520;
-const unsigned int g_defImageWidth = 800;
-const unsigned int g_defImageHeight = 600;
+//const unsigned int g_defImageWidth = 800;
+//const unsigned int g_defImageHeight = 600;
+const unsigned int g_defImageWidth = 352;
+const unsigned int g_defImageHeight = 288;
 
 const int g_listWidth = 400;
 const int g_elmPadding = 20;
@@ -115,7 +120,7 @@ void CMainFrame::StopStreamWorker()
 		m_thread.join();
 }
 
-Color CMainFrame::getBayerColor(size_t curCol, unsigned char data)
+inline Color CMainFrame::getBayerColor(size_t curCol, unsigned char data)
 {
 	Color color;
 
@@ -176,7 +181,7 @@ Color CMainFrame::getBayerColor(size_t curCol, unsigned char data)
 	return color;
 }
 
-Color CMainFrame::getYUVColor(size_t curCol, unsigned char data)
+inline Color CMainFrame::getYUVColor(size_t curCol, unsigned char data)
 {
 	Color color;
 
@@ -187,7 +192,7 @@ Color CMainFrame::getYUVColor(size_t curCol, unsigned char data)
 	return color;
 }
 
-Color CMainFrame::getColor(size_t curCol, unsigned char data)
+inline Color CMainFrame::getColor(size_t curCol, unsigned char data)
 {
 	Color color;
 
@@ -207,27 +212,46 @@ Color CMainFrame::getColor(size_t curCol, unsigned char data)
 	return color;
 }
 
+void CMainFrame::addLogString(CString str)
+{
+	m_logList.AddString(str);
+	m_logList.SetCurSel(m_logList.GetCount() - 1);
+	m_logList.SetCurSel(-1);
+}
+
 LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 {
 	auto now = std::chrono::system_clock::now();
-	if (std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastPacketTimestamp) > 100ms)
+	if (std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastPacketTimestamp) > 1000ms)
 	{
 		m_curRow = 0;
 		m_startFPSTimestamp = now;
+		m_startGlobalFPSTimestamp = now;
+		m_frameCount = 0;
+		m_globalFrameCount = 0;
 
-		m_logList.AddString(_T("New streaming"));
+		addLogString(_T("New streaming"));
 	}
 
 	m_lastPacketTimestamp = now;
+	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_startFPSTimestamp).count();
 
-	if (std::chrono::duration_cast<std::chrono::milliseconds>(now - m_startFPSTimestamp) > 1000ms)
+	// Output FPS every second
+	if (duration > 1000)
 	{
+		m_globalFrameCount += m_frameCount;
+
+		auto globalDuration = std::chrono::duration_cast<std::chrono::seconds>(now - m_startGlobalFPSTimestamp).count();
+		unsigned int globalFPS = m_globalFrameCount / globalDuration;
+
 		CString fps;
-		fps.Format(_T("FPS: %d"), m_frameCount);
-		m_logList.AddString(fps);
+		fps.Format(_T("FPS: %d / %d"), /*m_frameCount, */m_FPSTotalRowCount / m_height, globalFPS/*, duration*/);
+		//m_logList.AddString(fps);
+		addLogString(fps);
 
 		m_startFPSTimestamp = now;
 		m_frameCount = 0;
+		m_FPSTotalRowCount = 0;
 	}
 
 	//if ((m_frameQueue.size() > 0) && (m_frameQueue.size() < 10))
@@ -235,66 +259,148 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 	//	CString str;
 	//	str.Format(_T("Packets in queue: %d"), m_frameQueue.size());
 	//	m_logList.AddString(str);
+	//  addLogString(str);
 	//}
 
-	std::vector<unsigned char> data;
+	//return 0;
+
+	std::queue<std::vector<unsigned char>> dataQueue;
 	{
 		std::lock_guard<std::mutex> lock(m_queueMutex);
-		if (m_frameQueue.empty())
-			return 0;
-
-		data = std::move(m_frameQueue.front());
-		m_frameQueue.pop();
+		std::swap(m_frameQueue, dataQueue);
 	}
-
-	//return 0;
 
 	BYTE* pixels = (BYTE*)m_image.GetBits();
 	if (pixels)
 	{
-		int width = m_image.GetWidth();
-		int height = m_image.GetHeight();
-		int pitch = m_image.GetPitch();
-
-		size_t rowShift = m_curRow * pitch;
-		size_t dataInd = 0;
-		size_t curCol = 0;
-
-		for (size_t dataInd = 0; dataInd < data.size(); ++dataInd)
+		int maxRow = -1;
+		int minRow = std::numeric_limits<int>::max();
+		while (!dataQueue.empty())
 		{
-			// SBGGR10 Bayer image data format: 10 bits per pixel.
-			// It means 4 bytes of 4 pixels data and 5th byte containing
-			// additional bits of pixel data of the previous 4 bytes,
-			// 2 bits per each byte.
-			if ((m_pixelFormat == PixelFormat::BAYER_RGGB12) && (dataInd % 3 == 2))
-				continue;
-			else
-			if ((m_pixelFormat == PixelFormat::BAYER_RGGB10) && (dataInd % 5 == 4))
-				continue;
+			std::vector<unsigned char> data = dataQueue.front();
+			dataQueue.pop();
 
-			//for (int i = 0; i < 2; ++i)
+			int width = m_image.GetWidth();
+			int height = m_image.GetHeight();
+			int pitch = m_image.GetPitch();
+
+			if (data.size() == 1)
 			{
-				size_t pixelShift = rowShift + 3 * curCol;
+				m_colorBitShift = data[0];
 
-				Color color = getColor(curCol, data[dataInd]);
+				CString str;
+				str.Format(_T("COLOR DEPTH: %d"), 8 - m_colorBitShift);
+				//m_logList.AddString(str);
+				addLogString(str);
 
-				pixels[pixelShift + R] = color.R;
-				pixels[pixelShift + G] = color.G;
-				pixels[pixelShift + B] = color.B;
+				continue;
+			}
+			else if (data.size() < 10)
+			{
+				if (m_frameCount == 5)
+				{
+					// Output total packed frame size
+					int frameSize = 0;
+					for (auto&& it : data)
+					{
+						frameSize *= 10;
+						frameSize += it;
+					}
 
-				++curCol;
+					CString str;
+					str.Format(_T("Packed frame size: %d"), frameSize);
+					//m_logList.AddString(str);
+					addLogString(str);
+				}
+
+				continue;
+			}
+
+			//if (data.size() >= 2)
+			//	m_curRow = data[0] + (data[1] << 8);
+				
+			size_t rowShift = m_curRow * pitch;
+			size_t curCol = 0;
+			size_t dataSize = data.size();
+			int rowPixels = 0;
+
+			for (size_t dataInd = 1; dataInd < dataSize; dataInd += 2)
+			{
+				uint8_t dataByte = data[dataInd];
+
+				// SBGGR10 Bayer image data format: 10 bits per pixel.
+				// It means 4 bytes of 4 pixels data and 5th byte containing
+				// additional bits of pixel data of the previous 4 bytes,
+				// 2 bits per each byte.
+				if ((m_pixelFormat == PixelFormat::BAYER_RGGB12) && (dataInd % 3 == 2))
+					continue;
+				else
+					if ((m_pixelFormat == PixelFormat::BAYER_RGGB10) && (dataInd % 5 == 4))
+						continue;
+
+				//// Two shared adjacent pixels compression
+				//int count = 2;
+				//uint8_t luminance = dataByte;
+
+				// Compress several adjacent pixel into one color value
+				int colorSmooth = 1 << m_colorBitShift;
+
+				int count = (dataByte % colorSmooth) + 1;
+				rowPixels += count;
+				uint8_t luminance = dataByte - (dataByte % colorSmooth);
+				for (int i = 0; i < count; ++i)
+				{
+					size_t pixelShift = rowShift + 3 * curCol;
+
+					//Color color = getColor(curCol, data[dataInd]);
+
+					//pixels[pixelShift + R] = color.R;
+					//pixels[pixelShift + G] = color.G;
+					//pixels[pixelShift + B] = color.B;
+
+					pixels[pixelShift + R] = luminance;
+					pixels[pixelShift + G] = luminance;
+					pixels[pixelShift + B] = luminance;
+
+					++curCol;
+
+					if (curCol >= m_width)
+					{
+						// Start of the new image row
+						++m_curRow;
+						++m_FPSTotalRowCount;
+						rowShift = m_curRow * pitch;
+						curCol = 0;
+
+						if (rowPixels != m_width)
+						{
+							CString str;
+							str.Format(_T("Row size mismatch: %d vs %d"), rowPixels, m_width);
+							//m_logList.AddString(str);
+							addLogString(str);
+						}
+
+						rowPixels = 0;
+
+						if (m_curRow < minRow)
+							minRow = m_curRow;
+						if (m_curRow > maxRow)
+							maxRow = m_curRow;
+
+						if (m_curRow >= height)
+						{
+							m_curRow = 0;
+							rowShift = m_curRow * pitch;
+
+							++m_frameCount;
+						}
+					}
+				}
 			}
 		}
 
-		++m_curRow;
-		if (m_curRow >= height)
-		{
-			m_curRow = 0;
-			++m_frameCount;
-		}
-
-		//// Invalidate just single row
-		CRect dirtyRect(0, m_curRow - 1, m_width, m_curRow + 1);
+		// Invalidate just updated area
+		CRect dirtyRect(0, minRow - 1, m_width, maxRow + 1);
 		InvalidateRect(&dirtyRect, FALSE);
 
 		//// Invalidate whole image
@@ -341,7 +447,8 @@ void CMainFrame::UpdateFrame()
 	m_logList.SetFont(GetFont());  // Use same font as frame
 
 	// Add initial text if desired
-	m_logList.AddString(_T("UDP Camera Stream Started"));
+	//m_logList.AddString();
+	addLogString(_T("UDP Camera Stream Started"));
 
 	// Start UDP worker
 	StartStreamWorker();
@@ -353,8 +460,8 @@ void CMainFrame::UpdateFrame()
 // Add size handler to reposition controls:
 void CMainFrame::OnSize(UINT nType, int cx, int cy)
 {
-    CFrameWnd::OnSize(nType, cx, cy);
-    UpdateLayout();
+	CFrameWnd::OnSize(nType, cx, cy);
+	UpdateLayout();
 }
 
 void CMainFrame::UpdateLayout()
@@ -421,6 +528,7 @@ void CMainFrame::loop()
 
 	// large enough buffer for a UDP packet (increase if you use fragmentation/ larger MTU)
 	static std::vector<unsigned char> buf(g_bufLength);
+	static uint32_t packetCount = 0;
 
 	while (m_streamRunning) {
 		sockaddr_in from;
@@ -447,8 +555,11 @@ void CMainFrame::loop()
 
 		// notify UI thread that a frame (or packet) is ready
 		if (m_hWnd) {
-			::PostMessage(m_hWnd, WM_PACKET_RECEIVED, 0, 0);
+			//if (packetCount % 4 == 0)
+				::PostMessage(m_hWnd, WM_PACKET_RECEIVED, 0, 0);
 		}
+
+		++packetCount;
 	}
 
 	closesocket(s);
