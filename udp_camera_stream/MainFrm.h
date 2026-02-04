@@ -57,6 +57,7 @@ private:
 	inline Color getColor(size_t curCol, unsigned char data);
 
 	void addLogString(CString str);
+	void incCurRow(int* minRow, int* maxRow);
 private:
 	CImage m_image;  // Member variable for the image
 	CListBox m_logList;  // Log list box
