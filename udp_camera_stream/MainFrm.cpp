@@ -342,7 +342,7 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 			int rowPixels = 0;
 			uint16_t prevRow = m_curRow;
 
-			for (size_t dataInd = 1; dataInd < dataSize; dataInd += 2)
+			for (size_t dataInd = 1; dataInd < dataSize; dataInd += 1)
 			{
 				uint8_t dataByte = data[dataInd];
 
