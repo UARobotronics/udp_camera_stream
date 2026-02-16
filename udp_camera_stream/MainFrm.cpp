@@ -27,6 +27,7 @@ const unsigned int g_port = 8080;
 //const unsigned int g_defImageHeight = 600;
 const unsigned int g_defImageWidth = 352;
 const unsigned int g_defImageHeight = 288;
+const unsigned int g_packetHeaderSize = 4;
 
 const int g_listWidth = 400;
 const int g_elmPadding = 20;
@@ -236,6 +237,17 @@ void CMainFrame::incCurRow(int* minRow, int* maxRow)
 	}
 }
 
+void CMainFrame::parsePacketHeader(const std::vector<unsigned char>& data, uint16_t& frame, uint16_t& row, uint8_t& flags, uint8_t& format)
+{
+	if (data.size() < 4)
+		return;
+
+	frame = ((uint16_t)(data[0]) << 5) + ((uint16_t)(data[1]) >> 3);
+	row = ((uint16_t)(data[1] & 0x7) << 8) + data[2];
+	flags = data[3] >> 2;
+	format = data[3] & 0x3;
+}
+
 LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 {
 	auto now = std::chrono::system_clock::now();
@@ -301,48 +313,22 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 			int height = m_image.GetHeight();
 			int pitch = m_image.GetPitch();
 
-			//if (data.size() == 1)
-			//{
-			//	m_colorBitShift = data[0];
+			uint16_t curFrame;
+			uint8_t flags;
+			uint8_t format;
 
-			//	CString str;
-			//	str.Format(_T("COLOR DEPTH: %d"), 8 - m_colorBitShift);
-			//	//m_logList.AddString(str);
-			//	addLogString(str);
+			parsePacketHeader(data, curFrame, m_curRow, flags, format);
 
-			//	continue;
-			//}
-			//else if (data.size() < 10)
-			//{
-			//	if (m_frameCount == 5)
-			//	{
-			//		// Output total packed frame size
-			//		int frameSize = 0;
-			//		for (auto&& it : data)
-			//		{
-			//			frameSize *= 10;
-			//			frameSize += it;
-			//		}
+			if (m_curRow >= m_height)
+				continue;
 
-			//		CString str;
-			//		str.Format(_T("Packed frame size: %d"), frameSize);
-			//		//m_logList.AddString(str);
-			//		addLogString(str);
-			//	}
-
-			//	continue;
-			//}
-
-			//if (data.size() >= 2)
-			//	m_curRow = data[0] + (data[1] << 8);
-				
 			size_t rowShift = m_curRow * pitch;
 			size_t curCol = 0;
 			size_t dataSize = data.size();
 			int rowPixels = 0;
 			uint16_t prevRow = m_curRow;
 
-			for (size_t dataInd = 1; dataInd < dataSize; dataInd += 1)
+			for (size_t dataInd = g_packetHeaderSize; dataInd < dataSize; dataInd += 1)
 			{
 				uint8_t dataByte = data[dataInd];
 
@@ -353,8 +339,8 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 				if ((m_pixelFormat == PixelFormat::BAYER_RGGB12) && (dataInd % 3 == 2))
 					continue;
 				else
-					if ((m_pixelFormat == PixelFormat::BAYER_RGGB10) && (dataInd % 5 == 4))
-						continue;
+				if ((m_pixelFormat == PixelFormat::BAYER_RGGB10) && (dataInd % 5 == 4))
+					continue;
 
 				// Compress several adjacent pixel into one color value
 				int colorSmooth = 1 << m_colorBitShift;
@@ -393,6 +379,7 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 						//}
 
 						rowPixels = 0;
+						curCol = 0;
 
 						incCurRow(&minRow, &maxRow);
 						rowShift = m_curRow * pitch;

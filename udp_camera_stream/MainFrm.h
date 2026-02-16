@@ -58,6 +58,7 @@ private:
 
 	void addLogString(CString str);
 	void incCurRow(int* minRow, int* maxRow);
+	void parsePacketHeader(const std::vector<unsigned char>& data, uint16_t& frame, uint16_t& row, uint8_t& flags, uint8_t& format);
 private:
 	CImage m_image;  // Member variable for the image
 	CListBox m_logList;  // Log list box
