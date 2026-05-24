@@ -21,12 +21,14 @@ const int g_bufLength = 65536;
 const unsigned int g_port = 8080;
 //const unsigned int g_defImageWidth = 1330;
 //const unsigned int g_defImageHeight = 990;
-//const unsigned int g_defImageWidth = 2028;
-//const unsigned int g_defImageHeight = 1520;
-//const unsigned int g_defImageWidth = 800;
-//const unsigned int g_defImageHeight = 600;
-const unsigned int g_defImageWidth = 352;
-const unsigned int g_defImageHeight = 288;
+//const unsigned int g_defImageWidth = 1600;
+//const unsigned int g_defImageHeight = 1200;
+const unsigned int g_defImageWidth = 800;
+const unsigned int g_defImageHeight = 600;
+//const unsigned int g_defImageWidth = 1600;
+//const unsigned int g_defImageHeight = 400;
+//const unsigned int g_defImageWidth = 400;
+//const unsigned int g_defImageHeight = 300;
 const unsigned int g_packetHeaderSize = 4;
 
 const int g_listWidth = 400;
@@ -220,21 +222,24 @@ void CMainFrame::addLogString(CString str)
 	m_logList.SetCurSel(-1);
 }
 
-void CMainFrame::incCurRow(int* minRow, int* maxRow)
+void CMainFrame::updateMinMaxRow(int* minRow, int* maxRow)
 {
-	++m_curRow;
-	++m_FPSTotalRowCount;
-
 	if (m_curRow < *minRow)
 		*minRow = m_curRow;
 	if (m_curRow > *maxRow)
 		*maxRow = m_curRow;
 
+	++m_FPSTotalRowCount;
+}
+
+void CMainFrame::incCurRow(int* minRow, int* maxRow)
+{
+	updateMinMaxRow(minRow, maxRow);
+
+	++m_curRow;
+
 	if (m_curRow >= m_height)
-	{
 		m_curRow = 0;
-		++m_frameCount;
-	}
 }
 
 void CMainFrame::parsePacketHeader(const std::vector<unsigned char>& data, uint16_t& frame, uint16_t& row, uint8_t& flags, uint8_t& format)
@@ -244,6 +249,7 @@ void CMainFrame::parsePacketHeader(const std::vector<unsigned char>& data, uint1
 
 	frame = ((uint16_t)(data[0]) << 5) + ((uint16_t)(data[1]) >> 3);
 	row = ((uint16_t)(data[1] & 0x7) << 8) + data[2];
+	//row = ((uint16_t)(data[0] & 0xFF) << 8) + data[1];
 	flags = data[3] >> 2;
 	format = data[3] & 0x3;
 }
@@ -258,6 +264,7 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 		m_startGlobalFPSTimestamp = now;
 		m_frameCount = 0;
 		m_globalFrameCount = 0;
+		m_FPSTotalRowCount = 0;
 
 		addLogString(_T("New streaming"));
 	}
@@ -317,7 +324,11 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 			uint8_t flags;
 			uint8_t format;
 
+			uint16_t prevRow = m_curRow;
 			parsePacketHeader(data, curFrame, m_curRow, flags, format);
+
+			if (m_curRow < prevRow)
+				++m_frameCount;
 
 			if (m_curRow >= m_height)
 				continue;
@@ -326,7 +337,6 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 			size_t curCol = 0;
 			size_t dataSize = data.size();
 			int rowPixels = 0;
-			uint16_t prevRow = m_curRow;
 
 			for (size_t dataInd = g_packetHeaderSize; dataInd < dataSize; dataInd += 1)
 			{
@@ -344,12 +354,22 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 
 				// Compress several adjacent pixel into one color value
 				int colorSmooth = 1 << m_colorBitShift;
-
+				int maxLuminance = 256 - colorSmooth;
 				int count = (dataByte % colorSmooth) + 1;
 				rowPixels += count;
 				uint8_t luminance = dataByte - (dataByte % colorSmooth);
+				luminance = (float)(luminance) / maxLuminance * 255;
 				for (int i = 0; i < count; ++i)
 				{
+					if (curCol >= m_width)
+					{
+						rowPixels = 0;
+						curCol = 0;
+
+						incCurRow(&minRow, &maxRow);
+						rowShift = m_curRow * pitch;
+					}
+
 					size_t pixelShift = rowShift + 3 * curCol;
 
 					//Color color = getColor(curCol, data[dataInd]);
@@ -363,32 +383,10 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 					pixels[pixelShift + B] = luminance;
 
 					++curCol;
-
-					if (curCol >= m_width)
-					{
-						// Start of the new image row
-						//++m_curRow;
-						//++m_FPSTotalRowCount;
-						//curCol = 0;
-
-						//if (rowPixels != m_width)
-						//{
-						//	CString str;
-						//	str.Format(_T("Row size mismatch: %d vs %d"), rowPixels, m_width);
-						//	addLogString(str);
-						//}
-
-						rowPixels = 0;
-						curCol = 0;
-
-						incCurRow(&minRow, &maxRow);
-						rowShift = m_curRow * pitch;
-					}
 				}
 			}
 
-			if (prevRow == m_curRow)
-				incCurRow(&minRow, &maxRow);
+			updateMinMaxRow(&minRow, &maxRow);
 		}
 
 		// Invalidate just updated area

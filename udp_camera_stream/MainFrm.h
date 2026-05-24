@@ -57,6 +57,7 @@ private:
 	inline Color getColor(size_t curCol, unsigned char data);
 
 	void addLogString(CString str);
+	void updateMinMaxRow(int* minRow, int* maxRow);
 	void incCurRow(int* minRow, int* maxRow);
 	void parsePacketHeader(const std::vector<unsigned char>& data, uint16_t& frame, uint16_t& row, uint8_t& flags, uint8_t& format);
 private:
@@ -83,7 +84,7 @@ private:
 	unsigned int m_frameCount = 0;
 	unsigned int m_globalFrameCount = 0;
 	unsigned int m_FPSTotalRowCount = 0;
-	//unsigned int m_colorBitShift = 2;
-	unsigned int m_colorBitShift = 0;
+	unsigned int m_colorBitShift = 3;
+	//unsigned int m_colorBitShift = 0;
 };
 
