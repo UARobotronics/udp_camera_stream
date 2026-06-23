@@ -19,24 +19,38 @@ constexpr UINT WM_PACKET_RECEIVED = WM_APP + 1;
 
 const int g_bufLength = 65536;
 const unsigned int g_port = 8080;
-//const unsigned int g_defImageWidth = 1330;
-//const unsigned int g_defImageHeight = 990;
-//const unsigned int g_defImageWidth = 1600;
-//const unsigned int g_defImageHeight = 1200;
 const unsigned int g_defImageWidth = 800;
 const unsigned int g_defImageHeight = 600;
-//const unsigned int g_defImageWidth = 1600;
-//const unsigned int g_defImageHeight = 400;
-//const unsigned int g_defImageWidth = 400;
-//const unsigned int g_defImageHeight = 300;
 const unsigned int g_packetHeaderSize = 4;
 
-const int g_listWidth = 400;
+const int g_listWidth = 500;
 const int g_elmPadding = 20;
 
 const unsigned int R = 2;
 const unsigned int G = 1;
 const unsigned int B = 0;
+
+ColorDepth intToColorDepth(uint8_t depth)
+{
+	switch (depth)
+	{
+		case 0 : return ColorDepth::_8_BYTES;
+		case 1 : return ColorDepth::_7_BYTES;
+		case 2 : return ColorDepth::_6_BYTES;
+		case 3 : return ColorDepth::_5_BYTES;
+	}
+}
+
+CString colorDepthToString(uint8_t depth)
+{
+	switch (depth)
+	{
+		case ColorDepth::_8_BYTES: return CString("8 bytes");
+		case ColorDepth::_7_BYTES: return CString("7 bytes");
+		case ColorDepth::_6_BYTES: return CString("6 bytes");
+		case ColorDepth::_5_BYTES: return CString("5 bytes");
+	}
+}
 
 CMainFrame::CMainFrame() noexcept
 	: CFrameWnd()
@@ -232,26 +246,27 @@ void CMainFrame::updateMinMaxRow(int* minRow, int* maxRow)
 	++m_FPSTotalRowCount;
 }
 
-void CMainFrame::incCurRow(int* minRow, int* maxRow)
+void CMainFrame::incCurRow(int increment, int* minRow, int* maxRow)
 {
 	updateMinMaxRow(minRow, maxRow);
 
-	++m_curRow;
+	m_curRow += increment;
 
 	if (m_curRow >= m_height)
 		m_curRow = 0;
 }
 
-void CMainFrame::parsePacketHeader(const std::vector<unsigned char>& data, uint16_t& frame, uint16_t& row, uint8_t& flags, uint8_t& format)
+void CMainFrame::parsePacketHeader(const std::vector<unsigned char>& data, uint16_t& frame, uint16_t& row, uint8_t& flags, uint8_t& skipRows, uint8_t& colorDepth)
 {
-	if (data.size() < 4)
+	if (data.size() < g_packetHeaderSize)
 		return;
 
 	frame = ((uint16_t)(data[0]) << 5) + ((uint16_t)(data[1]) >> 3);
 	row = ((uint16_t)(data[1] & 0x7) << 8) + data[2];
 	//row = ((uint16_t)(data[0] & 0xFF) << 8) + data[1];
 	flags = data[3] >> 2;
-	format = data[3] & 0x3;
+	skipRows = (data[3] >> 2) & 0x7;
+	colorDepth = data[3] & 0x3;
 }
 
 LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
@@ -283,7 +298,7 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 		CString fps;
 		fps.Format(_T("FPS: %d / %d"), /*m_frameCount, */m_FPSTotalRowCount / m_height, globalFPS/*, duration*/);
 		//m_logList.AddString(fps);
-		addLogString(fps);
+		//addLogString(fps);
 
 		m_startFPSTimestamp = now;
 		m_frameCount = 0;
@@ -320,15 +335,52 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 			int height = m_image.GetHeight();
 			int pitch = m_image.GetPitch();
 
-			uint16_t curFrame;
 			uint8_t flags;
-			uint8_t format;
+			uint8_t colorDepth;
+			uint8_t skipRows;
+			uint16_t curFrame;
 
-			uint16_t prevRow = m_curRow;
-			parsePacketHeader(data, curFrame, m_curRow, flags, format);
+			static uint16_t prevRow = 0;
+			static uint8_t prevColorDepth = uint8_t(ColorDepth::_8_BYTES);
+			static uint8_t prevSkipRows = 0;
+			static uint16_t prevCurFrame = 0;
+			parsePacketHeader(data, curFrame, m_curRow, flags, skipRows, colorDepth);
+
+			if (prevColorDepth != colorDepth)
+			{
+				CString strDepth = colorDepthToString(colorDepth);
+				addLogString(strDepth);
+			}
+
+			if (prevSkipRows != skipRows)
+			{
+				CString strRows;
+				strRows.Format(_T("Now skipping %d rows every frame"), skipRows);
+				addLogString(strRows);
+			}
+
+			if ((m_curRow > 0) && (prevRow != m_curRow - 1))
+			{
+				CString strRows;
+				strRows.Format(_T("Rows skipped! Frame: %d, Cur row: %d, prev row: %d"), curFrame, m_curRow, prevRow);
+				//addLogString(strRows);
+			}
+
+			bool skip = false;
+			if (prevCurFrame > curFrame)
+				skip = true;
 
 			if (m_curRow < prevRow)
 				++m_frameCount;
+
+
+			prevRow = m_curRow;
+			prevColorDepth = colorDepth;
+			prevSkipRows = skipRows;
+			prevCurFrame = curFrame;
+
+			if (skip)
+				continue;
 
 			if (m_curRow >= m_height)
 				continue;
@@ -337,6 +389,9 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 			size_t curCol = 0;
 			size_t dataSize = data.size();
 			int rowPixels = 0;
+
+			int colorSmooth = 1 << colorDepth;
+			int maxLuminance = 256 - colorSmooth;
 
 			for (size_t dataInd = g_packetHeaderSize; dataInd < dataSize; dataInd += 1)
 			{
@@ -352,9 +407,7 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 				if ((m_pixelFormat == PixelFormat::BAYER_RGGB10) && (dataInd % 5 == 4))
 					continue;
 
-				// Compress several adjacent pixel into one color value
-				int colorSmooth = 1 << m_colorBitShift;
-				int maxLuminance = 256 - colorSmooth;
+				// Compress several adjacent pixels into one color value
 				int count = (dataByte % colorSmooth) + 1;
 				rowPixels += count;
 				uint8_t luminance = dataByte - (dataByte % colorSmooth);
@@ -366,7 +419,7 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 						rowPixels = 0;
 						curCol = 0;
 
-						incCurRow(&minRow, &maxRow);
+						incCurRow(skipRows + 1, &minRow, &maxRow);
 						rowShift = m_curRow * pitch;
 					}
 

@@ -18,6 +18,13 @@ enum class PixelFormat
 	YUV420
 };
 
+enum class ColorDepth {
+	_8_BYTES = 0,
+	_7_BYTES = 1,
+	_6_BYTES = 2,
+	_5_BYTES = 3,
+};
+
 struct Color
 {
 	byte R = 0;
@@ -58,8 +65,8 @@ private:
 
 	void addLogString(CString str);
 	void updateMinMaxRow(int* minRow, int* maxRow);
-	void incCurRow(int* minRow, int* maxRow);
-	void parsePacketHeader(const std::vector<unsigned char>& data, uint16_t& frame, uint16_t& row, uint8_t& flags, uint8_t& format);
+	void incCurRow(int increment, int* minRow, int* maxRow);
+	void parsePacketHeader(const std::vector<unsigned char>& data, uint16_t& frame, uint16_t& row, uint8_t& flags, uint8_t& skipRows, uint8_t& format);
 private:
 	CImage m_image;  // Member variable for the image
 	CListBox m_logList;  // Log list box
@@ -84,7 +91,5 @@ private:
 	unsigned int m_frameCount = 0;
 	unsigned int m_globalFrameCount = 0;
 	unsigned int m_FPSTotalRowCount = 0;
-	unsigned int m_colorBitShift = 3;
-	//unsigned int m_colorBitShift = 0;
 };
 
