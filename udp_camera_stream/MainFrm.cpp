@@ -371,8 +371,14 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 				skip = true;
 
 			if (m_curRow < prevRow)
+			{
+				// New frame has started
 				++m_frameCount;
 
+				CRect dirtyRect(0, 0, m_width, m_height);
+				InvalidateRect(&dirtyRect, FALSE);
+				UpdateWindow();
+			}
 
 			prevRow = m_curRow;
 			prevColorDepth = colorDepth;
@@ -443,20 +449,8 @@ LRESULT CMainFrame::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 		}
 
 		// Invalidate just updated area
-		CRect dirtyRect(0, minRow - 1, m_width, maxRow + 1);
-		InvalidateRect(&dirtyRect, FALSE);
-
-		//// Invalidate whole image
-		//if (m_curRow == m_height -1)
-		//{
-		//	auto start = std::chrono::system_clock::now();
-		//	//CRect dirtyRect(0, 0, m_curRow - 1, m_height);
-		//	CRect dirtyRect(0, m_curRow - 1, m_width, m_curRow + 1);
-		//	//InvalidateRect(&dirtyRect, FALSE);
-		//	auto end = std::chrono::system_clock::now();
-		//	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-		//	//m_logList.AddString(_T("Frame rendered"));
-		//}
+		//CRect dirtyRect(0, minRow - 1, m_width, maxRow + 1);
+		//InvalidateRect(&dirtyRect, FALSE);
 	}
 
 	return 0;
