@@ -533,46 +533,19 @@ void CMainFrame::UpdateLayout()
 
 void CMainFrame::loop()
 {
-	// Basic Winsock UDP receive loop.
-	WSADATA wsa;
-	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-		m_streamRunning = false;
+	bool b = m_communicator.initServer();
+	if (!b)
 		return;
-	}
-
-	SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (s == INVALID_SOCKET) {
-		WSACleanup();
-		m_streamRunning = false;
-		return;
-	}
-
-	// bind to any address, port 5000 (adjust as needed)
-	sockaddr_in si;
-	ZeroMemory(&si, sizeof(si));
-	si.sin_family = AF_INET;
-	si.sin_addr.s_addr = INADDR_ANY;
-	si.sin_port = htons(g_port);
-
-	if (bind(s, reinterpret_cast<sockaddr*>(&si), sizeof(si)) == SOCKET_ERROR) {
-		int error = WSAGetLastError();
-		closesocket(s);
-		WSACleanup();
-		m_streamRunning = false;
-
-		return;
-	}
 
 	// large enough buffer for a UDP packet (increase if you use fragmentation/ larger MTU)
-	static std::vector<unsigned char> buf(g_bufLength);
-	static uint32_t packetCount = 0;
+	std::vector<unsigned char> buf(g_bufLength);
+	uint32_t packetCount = 0;
 
-	while (m_streamRunning) {
-		sockaddr_in from;
-		int fromlen = sizeof(from);
-		int recvLen = recvfrom(s, reinterpret_cast<char*>(buf.data()), g_bufLength, 0,
-			reinterpret_cast<sockaddr*>(&from), &fromlen);
-		if (recvLen == SOCKET_ERROR) {
+	while (m_streamRunning)
+	{
+		int recvLen = m_communicator.receiveData(buf);
+		if (recvLen == SOCKET_ERROR)
+		{
 			int err = WSAGetLastError();
 			// optionally handle specific errors or sleep short time on non-fatal ones
 			if (!m_streamRunning)
@@ -591,16 +564,14 @@ void CMainFrame::loop()
 		}
 
 		// notify UI thread that a frame (or packet) is ready
-		if (m_hWnd) {
+		if (m_hWnd)
+		{
 			//if (packetCount % 4 == 0)
 				::PostMessage(m_hWnd, WM_PACKET_RECEIVED, 0, 0);
 		}
 
 		++packetCount;
 	}
-
-	closesocket(s);
-	WSACleanup();
 }
 
 void CMainFrame::OnPaint()

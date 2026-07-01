@@ -11,6 +11,8 @@
 #include <thread>
 #include <vector>
 
+#include "Communicator.h"
+
 enum class PixelFormat
 {
 	BAYER_RGGB12,
@@ -70,6 +72,7 @@ private:
 private:
 	CImage m_image;  // Member variable for the image
 	CListBox m_logList;  // Log list box
+	Communicator m_communicator;
 
 	int m_width = 0;
 	int m_height = 0;
