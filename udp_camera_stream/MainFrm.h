@@ -34,6 +34,13 @@ struct Color
 	byte B = 0;
 };
 
+enum class State
+{
+	ConnectToServer = 0,
+	WaitConfirmation = 1,
+	ReceiveVideoStream = 2,
+};
+
 class CMainFrame : public CFrameWnd
 {
 public:
@@ -79,6 +86,7 @@ private:
 	uint16_t m_curRow = 0;
 	//PixelFormat m_pixelFormat = PixelFormat::BAYER_RGGB10;
 	PixelFormat m_pixelFormat = PixelFormat::YUV420;
+	State m_state = State::ConnectToServer;
 
 	// networking / worker thread
 	std::thread m_thread;

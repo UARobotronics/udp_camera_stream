@@ -5,6 +5,8 @@
 
 #include "WinSock2.h"
 
+#include "Command.h"
+
 enum class PeerType
 {
 	Server = 0,
@@ -17,18 +19,20 @@ public:
 	Communicator();
 	~Communicator();
 
-	bool initServer();
-	bool initClientByAddress(const std::string& ipAddr);
-	bool initClientByDNS(const std::string& dnsName);
+	bool init();
+	void setDestination(const std::string& dstAddress, const unsigned int dstPort);
 
-	bool sendData(const std::string& dnsName, const std::string& data);
+	bool sendData(const char* data, const size_t dataLen);
 	int receiveData(std::vector<unsigned char>& buffer);
+
+	bool sendCmdConnectToServer();
 
 private:
 	ULONG getAddressByDNS(const std::string& dnsName);
-	bool init(PeerType type, ULONG addr);
 
 private:
 	SOCKET m_socket = INVALID_SOCKET;
 	unsigned int m_port = 8080;
+	unsigned int m_dstPort = 0;
+	std::string m_dstAddress = "";
 };

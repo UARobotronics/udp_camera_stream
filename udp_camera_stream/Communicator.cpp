@@ -16,30 +16,48 @@ Communicator::~Communicator()
 	WSACleanup();
 }
 
-bool Communicator::initServer()
+bool Communicator::init()
 {
-	return init(PeerType::Server, INADDR_ANY);
-}
-
-bool Communicator::initClientByAddress(const std::string& ipAddr)
-{
-	IN_ADDR a;
-	int res = inet_pton(AF_INET, ipAddr.c_str(), &a);
-
-	if (res == 1)
-		return init(PeerType::Client, a.s_addr);
-	else
+	WSADATA wsa;
+	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
 		return false;
-}
 
-bool Communicator::initClientByDNS(const std::string& dnsName)
-{
+	m_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (m_socket == INVALID_SOCKET)
+		return false;
+
+	sockaddr_in si;
+	ZeroMemory(&si, sizeof(si));
+	si.sin_family = AF_INET;
+	si.sin_port = htons(m_port);
+	si.sin_addr.s_addr = htonl(INADDR_ANY);
+
+	if (bind(m_socket, reinterpret_cast<sockaddr*>(&si), sizeof(si)) == SOCKET_ERROR)
+	{
+		int error = WSAGetLastError();
+
+		return false;
+	}
+
 	return true;
 }
 
-bool Communicator::sendData(const std::string& dnsName, const std::string& data)
+void Communicator::setDestination(const std::string& dstAddress, const unsigned int dstPort)
 {
-	return true;
+	m_dstAddress = dstAddress;
+	m_dstPort = dstPort;
+}
+
+bool Communicator::sendData(const char* data, const size_t dataLen)
+{
+	sockaddr_in addr;
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(m_dstPort);
+	inet_pton(AF_INET, m_dstAddress.c_str(), &addr.sin_addr);
+
+	int res = sendto(m_socket, data, dataLen, 0, (sockaddr*)(&addr), sizeof(addr));
+
+	return (res != SOCKET_ERROR);
 }
 
 // buffer size must be large enough to receive all data
@@ -54,13 +72,20 @@ int Communicator::receiveData(std::vector<unsigned char>& buffer)
 	return len;
 }
 
+bool Communicator::sendCmdConnectToServer()
+{
+	std::vector<char> buf = { char(CMD_CONNECT_TO_SERVER) };
+
+	return sendData(buf.data(), buf.size());
+}
+
 ULONG Communicator::getAddressByDNS(const std::string& dnsName)
 {
 	ULONG result = INADDR_NONE;
 
 	struct addrinfo hints = { 0 };
-	hints.ai_family = AF_UNSPEC;     // AF_INET to force IPv4, AF_INET6 for IPv6
-	hints.ai_socktype = SOCK_STREAM;   // TCP
+	hints.ai_family = AF_UNSPEC; // AF_INET to force IPv4, AF_INET6 for IPv6
+	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 
 	addrinfo* pAddr = nullptr;
@@ -77,26 +102,4 @@ ULONG Communicator::getAddressByDNS(const std::string& dnsName)
 	freeaddrinfo(pAddr);
 
 	return result;
-}
-
-bool Communicator::init(PeerType type, ULONG addr)
-{
-	WSADATA wsa;
-	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
-		return false;
-
-	m_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (m_socket == INVALID_SOCKET)
-		return false;
-
-	sockaddr_in si;
-	ZeroMemory(&si, sizeof(si));
-	si.sin_family = AF_INET;
-	si.sin_addr.s_addr = addr;
-	si.sin_port = htons(m_port);
-
-	if (bind(m_socket, reinterpret_cast<sockaddr*>(&si), sizeof(si)) == SOCKET_ERROR)
-		return false;
-
-	return true;
 }

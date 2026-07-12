@@ -30,6 +30,9 @@ const unsigned int R = 2;
 const unsigned int G = 1;
 const unsigned int B = 0;
 
+const std::string g_dstAddress = "192.168.50.122";
+const unsigned int g_dstPort = 6666;
+
 ColorDepth intToColorDepth(uint8_t depth)
 {
 	switch (depth)
@@ -484,7 +487,6 @@ void CMainFrame::UpdateFrame()
 	m_logList.SetFont(GetFont());  // Use same font as frame
 
 	// Add initial text if desired
-	//m_logList.AddString();
 	addLogString(_T("UDP Camera Stream Started"));
 
 	// Start UDP worker
@@ -533,44 +535,55 @@ void CMainFrame::UpdateLayout()
 
 void CMainFrame::loop()
 {
-	bool b = m_communicator.initServer();
+	bool b = m_communicator.init();
 	if (!b)
 		return;
 
-	// large enough buffer for a UDP packet (increase if you use fragmentation/ larger MTU)
+	m_communicator.setDestination(g_dstAddress, g_dstPort);
+
 	std::vector<unsigned char> buf(g_bufLength);
 	uint32_t packetCount = 0;
 
 	while (m_streamRunning)
 	{
-		int recvLen = m_communicator.receiveData(buf);
-		if (recvLen == SOCKET_ERROR)
+		int recvLen;
+
+		switch (m_state)
 		{
-			int err = WSAGetLastError();
-			// optionally handle specific errors or sleep short time on non-fatal ones
-			if (!m_streamRunning)
+			case State::ConnectToServer :
+				m_communicator.sendCmdConnectToServer();
+				m_state = State::WaitConfirmation;
+
 				break;
+			case State::WaitConfirmation:
+				recvLen = m_communicator.receiveData(buf);
+				if (recvLen != CMD_SEND_ACK_TO_CLIENT_SIZE)
+					break;
 
-			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+				if (buf[0] != CMD_SEND_ACK_TO_CLIENT)
+					break;
 
-			continue;
+				m_state = State::ReceiveVideoStream;
+
+				break;
+			case State::ReceiveVideoStream:
+				recvLen = m_communicator.receiveData(buf);
+
+				// push the received packet (copy only the bytes received)
+				std::vector<unsigned char> packet(buf.begin(), buf.begin() + recvLen);
+				{
+					std::lock_guard<std::mutex> lock(m_queueMutex);
+					m_frameQueue.push(std::move(packet));
+				}
+
+				// notify UI thread that a frame (or packet) is ready
+				if (m_hWnd)
+					::PostMessage(m_hWnd, WM_PACKET_RECEIVED, 0, 0);
+
+				++packetCount;
+
+				break;
 		}
-
-		// push the received packet (copy only the bytes received)
-		std::vector<unsigned char> packet(buf.begin(), buf.begin() + recvLen);
-		{
-			std::lock_guard<std::mutex> lock(m_queueMutex);
-			m_frameQueue.push(std::move(packet));
-		}
-
-		// notify UI thread that a frame (or packet) is ready
-		if (m_hWnd)
-		{
-			//if (packetCount % 4 == 0)
-				::PostMessage(m_hWnd, WM_PACKET_RECEIVED, 0, 0);
-		}
-
-		++packetCount;
 	}
 }
 
