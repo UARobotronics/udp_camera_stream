@@ -48,6 +48,17 @@ void Communicator::setDestination(const std::string& dstAddress, const unsigned 
 	m_dstPort = dstPort;
 }
 
+void Communicator::setSocketTimeout(DWORD ms)
+{
+	setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&ms, sizeof(ms));
+}
+
+void Communicator::resetSocketTimeout()
+{
+	DWORD timeoutMs = 0;
+	setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeoutMs, sizeof(timeoutMs));
+}
+
 bool Communicator::sendData(const char* data, const size_t dataLen)
 {
 	sockaddr_in addr;
@@ -62,12 +73,15 @@ bool Communicator::sendData(const char* data, const size_t dataLen)
 
 // buffer size must be large enough to receive all data
 // contained in a socket
-int Communicator::receiveData(std::vector<unsigned char>& buffer)
+int Communicator::receiveData(std::vector<unsigned char>& buffer, bool* isTimeout = nullptr)
 {
 	sockaddr_in from;
 	int fromLen = sizeof(from);
 	int len = recvfrom(m_socket, reinterpret_cast<char*>(buffer.data()), buffer.size(), 0,
 		reinterpret_cast<sockaddr*>(&from), &fromLen);
+
+	if (isTimeout)
+		*isTimeout = ((len == SOCKET_ERROR) && (WSAGetLastError() == WSAETIMEDOUT));
 
 	return len;
 }

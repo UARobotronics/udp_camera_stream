@@ -21,9 +21,11 @@ public:
 
 	bool init();
 	void setDestination(const std::string& dstAddress, const unsigned int dstPort);
+	void setSocketTimeout(DWORD ms);
+	void resetSocketTimeout();
 
 	bool sendData(const char* data, const size_t dataLen);
-	int receiveData(std::vector<unsigned char>& buffer);
+	int receiveData(std::vector<unsigned char>& buffer, bool* isTimeout);
 
 	bool sendCmdConnectToServer();
 	bool sendCmdSetColorDepth(uint8_t colorDepth);

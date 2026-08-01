@@ -32,12 +32,15 @@ protected:
 
 	DECLARE_MESSAGE_MAP()
 
+	void setState(State state);
+	void resetStream();
+
 	void startWorkerThread();
-	void processUDP();
+	void processCommunication();
 	void addLogString(CString str);
 	void updateMinMaxRow(int* minRow, int* maxRow);
 	void incCurRow(int increment, int* minRow, int* maxRow);
-	void parsePacketHeader(const std::vector<unsigned char>& data, uint16_t& frame, uint16_t& row, uint8_t& flags, uint8_t& skipRows, uint8_t& format);
+	bool parsePacketHeader(const std::vector<unsigned char>& data, uint16_t& frame, uint16_t& row, uint8_t& flags, uint8_t& skipRows, uint8_t& format);
 
 private:
 	CImage m_image;

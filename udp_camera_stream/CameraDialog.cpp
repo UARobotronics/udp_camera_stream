@@ -98,13 +98,12 @@ BOOL CCameraDialog::OnInitDialog()
 	m_width = g_defImageWidth;
 	m_height = g_defImageHeight;
 
-	m_state = State::ConnectToServer;
-
 	bool b = m_communicator.init();
 	if (!b)
 		return FALSE;
 
 	m_communicator.setDestination(g_dstAddress, g_dstPort);
+	setState(State::ConnectToServer);
 
 	startWorkerThread();
 
@@ -128,12 +127,46 @@ BOOL CCameraDialog::PreTranslateMessage(MSG* pMsg)
 	return CDialogEx::PreTranslateMessage(pMsg);
 }
 
-void CCameraDialog::startWorkerThread()
+void CCameraDialog::setState(State state)
 {
-	m_thread = std::thread(&CCameraDialog::processUDP, this);
+	m_state = state;
+
+	switch (state)
+	{
+		case State::ConnectToServer:
+			m_communicator.resetSocketTimeout();
+			break;
+		case State::WaitConfirmation:
+			m_communicator.setSocketTimeout(Timeouts::serverConfirmation);
+			break;
+		case State::ReceiveVideoStream:
+			m_communicator.setSocketTimeout(Timeouts::newDataPacket);
+			break;
+		default:
+			break;
+	}
 }
 
-void CCameraDialog::processUDP()
+void CCameraDialog::resetStream()
+{
+	auto now = std::chrono::system_clock::now();
+
+	m_curRow = 0;
+	m_startFPSTimestamp = now;
+	m_startGlobalFPSTimestamp = now;
+	m_frameCount = 0;
+	m_globalFrameCount = 0;
+	m_FPSTotalRowCount = 0;
+
+	addLogString(_T("Stream is lost. Resetting..."));
+}
+
+void CCameraDialog::startWorkerThread()
+{
+	m_thread = std::thread(&CCameraDialog::processCommunication, this);
+}
+
+void CCameraDialog::processCommunication()
 {
 	std::vector<unsigned char> buf(g_bufLength);
 	uint32_t packetCount = 0;
@@ -143,27 +176,45 @@ void CCameraDialog::processUDP()
 		while (true)
 		{
 			int recvLen;
+			bool timeout = false;
 
 			switch (m_state)
 			{
 			case State::ConnectToServer:
 				m_communicator.sendCmdConnectToServer();
-				m_state = State::WaitConfirmation;
+				setState(State::WaitConfirmation);
 
 				break;
 			case State::WaitConfirmation:
-				recvLen = m_communicator.receiveData(buf);
+				recvLen = m_communicator.receiveData(buf, &timeout);
+				
+				if (timeout)
+				{
+					// No confirmation received within specified interval. Try again.
+					setState(State::ConnectToServer);
+					break;
+				}
+
 				if (recvLen != CMD_SEND_ACK_TO_CLIENT_SIZE)
 					break;
 
 				if (buf[0] != CMD_SEND_ACK_TO_CLIENT)
 					break;
 
-				m_state = State::ReceiveVideoStream;
+				setState(State::ReceiveVideoStream);
 
 				break;
 			case State::ReceiveVideoStream:
-				recvLen = m_communicator.receiveData(buf);
+				recvLen = m_communicator.receiveData(buf, &timeout);
+
+				if (timeout)
+				{
+					// Reset connection to camera
+					resetStream();
+					setState(State::ConnectToServer);
+
+					break;
+				}
 
 				// push the received packet (copy only the bytes received)
 				std::vector<unsigned char> packet(buf.begin(), buf.begin() + recvLen);
@@ -215,10 +266,10 @@ void CCameraDialog::incCurRow(int increment, int* minRow, int* maxRow)
 		m_curRow = 0;
 }
 
-void CCameraDialog::parsePacketHeader(const std::vector<unsigned char>& data, uint16_t& frame, uint16_t& row, uint8_t& flags, uint8_t& skipRows, uint8_t& colorDepth)
+bool CCameraDialog::parsePacketHeader(const std::vector<unsigned char>& data, uint16_t& frame, uint16_t& row, uint8_t& flags, uint8_t& skipRows, uint8_t& colorDepth)
 {
 	if (data.size() < g_packetHeaderSize)
-		return;
+		return false;
 
 	frame = ((uint16_t)(data[0]) << 5) + ((uint16_t)(data[1]) >> 3);
 	row = ((uint16_t)(data[1] & 0x7) << 8) + data[2];
@@ -226,6 +277,8 @@ void CCameraDialog::parsePacketHeader(const std::vector<unsigned char>& data, ui
 	flags = data[3] >> 3;
 	skipRows = (data[3] >> 3) & 0x7;
 	colorDepth = data[3] & 0x7;
+
+	return true;
 }
 
 void CCameraDialog::OnOK()
@@ -251,17 +304,6 @@ void CCameraDialog::OnSkipRowsChanged()
 LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 {
 	auto now = std::chrono::system_clock::now();
-	if (std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastPacketTimestamp) > 3000ms)
-	{
-		m_curRow = 0;
-		m_startFPSTimestamp = now;
-		m_startGlobalFPSTimestamp = now;
-		m_frameCount = 0;
-		m_globalFrameCount = 0;
-		m_FPSTotalRowCount = 0;
-
-		addLogString(_T("New streaming"));
-	}
 
 	m_lastPacketTimestamp = now;
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_startFPSTimestamp).count();
@@ -323,7 +365,8 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 			static uint8_t prevColorDepth = uint8_t(ColorDepth::_8_BITS);
 			static uint8_t prevSkipRows = 0;
 			static uint16_t prevCurFrame = 0;
-			parsePacketHeader(data, curFrame, m_curRow, flags, skipRows, colorDepth);
+			if (!parsePacketHeader(data, curFrame, m_curRow, flags, skipRows, colorDepth))
+				continue;
 
 			if (prevColorDepth != colorDepth)
 			{
