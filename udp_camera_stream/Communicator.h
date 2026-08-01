@@ -26,6 +26,9 @@ public:
 	int receiveData(std::vector<unsigned char>& buffer);
 
 	bool sendCmdConnectToServer();
+	bool sendCmdSetColorDepth(uint8_t colorDepth);
+	bool sendCmdSetSkipRows(uint8_t skipRows);
+	bool sendCmdSetMinPacketSize(uint16_t packetSize);
 
 private:
 	ULONG getAddressByDNS(const std::string& dnsName);

@@ -79,6 +79,33 @@ bool Communicator::sendCmdConnectToServer()
 	return sendData(buf.data(), buf.size());
 }
 
+bool Communicator::sendCmdSetColorDepth(uint8_t colorDepth)
+{
+	std::vector<char> buf(2);
+	buf[0] = char(CMD_SEND_COLOR_DEPTH_TO_SERVER);
+	buf[1] = char(colorDepth);
+
+	return sendData(buf.data(), buf.size());
+}
+
+bool Communicator::sendCmdSetSkipRows(uint8_t colorDepth)
+{
+	std::vector<char> buf(2);
+	buf[0] = char(CMD_SEND_SKIP_ROWS_TO_SERVER);
+	buf[1] = char(colorDepth);
+
+	return sendData(buf.data(), buf.size());
+}
+
+bool Communicator::sendCmdSetMinPacketSize(uint16_t packetSize)
+{
+	std::vector<char> buf(2);
+	buf[0] = char(CMD_SEND_SKIP_ROWS_TO_SERVER);
+	buf[1] = char(packetSize);
+
+	return sendData(buf.data(), buf.size());
+}
+
 ULONG Communicator::getAddressByDNS(const std::string& dnsName)
 {
 	ULONG result = INADDR_NONE;

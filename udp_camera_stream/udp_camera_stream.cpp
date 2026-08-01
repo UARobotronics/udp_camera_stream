@@ -1,24 +1,19 @@
-
-// udp_camera_stream.cpp : Defines the class behaviors for the application.
-//
-
 #include "pch.h"
+
 #include "framework.h"
 #include "afxwinappex.h"
 #include "afxdialogex.h"
 #include "udp_camera_stream.h"
-#include "MainFrm.h"
 
+#include "CameraDialog.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
 
-
 // CudpcamerastreamApp
 
 BEGIN_MESSAGE_MAP(UDPCameraStreamApp, CWinApp)
-	ON_COMMAND(ID_APP_ABOUT, &UDPCameraStreamApp::OnAppAbout)
 END_MESSAGE_MAP()
 
 
@@ -65,11 +60,9 @@ BOOL UDPCameraStreamApp::InitInstance()
 
 	CWinApp::InitInstance();
 
-
 	// Initialize OLE libraries
 	if (!AfxOleInit())
 	{
-		AfxMessageBox(IDP_OLE_INIT_FAILED);
 		return FALSE;
 	}
 
@@ -90,21 +83,27 @@ BOOL UDPCameraStreamApp::InitInstance()
 	SetRegistryKey(_T("Local AppWizard-Generated Applications"));
 
 
-	// To create the main window, this code creates a new frame window
-	// object and then sets it as the application's main window object
-	CFrameWnd* pFrame = new CMainFrame;
-	if (!pFrame)
-		return FALSE;
-	m_pMainWnd = pFrame;
-	// create and load the frame with its resources
-	pFrame->LoadFrame(IDR_MAINFRAME,
-		WS_OVERLAPPEDWINDOW | FWS_ADDTOTITLE, nullptr,
-		nullptr);
+	CCameraDialog dlg;
+	m_pMainWnd = &dlg;
 
-	// The one and only window has been initialized, so show and update it
-	pFrame->ShowWindow(SW_SHOW);
-	pFrame->UpdateWindow();
-	return TRUE;
+	INT_PTR nResponse = dlg.DoModal();
+	if (nResponse == IDOK)
+	{
+		// TODO: Place code here to handle when the dialog is
+		//  dismissed with OK
+	}
+	else if (nResponse == IDCANCEL)
+	{
+		// TODO: Place code here to handle when the dialog is
+		//  dismissed with Cancel
+	}
+	else if (nResponse == -1)
+	{
+		TRACE(traceAppMsg, 0, "Warning: dialog creation failed, so application is terminating unexpectedly.\n");
+		TRACE(traceAppMsg, 0, "Warning: if you are using MFC controls on the dialog, you cannot #define _AFX_NO_MFC_CONTROLS_IN_DIALOGS.\n");
+	}
+
+	return FALSE;
 }
 
 int UDPCameraStreamApp::ExitInstance()
@@ -114,50 +113,3 @@ int UDPCameraStreamApp::ExitInstance()
 
 	return CWinApp::ExitInstance();
 }
-
-// CudpcamerastreamApp message handlers
-
-
-// CAboutDlg dialog used for App About
-
-class CAboutDlg : public CDialogEx
-{
-public:
-	CAboutDlg() noexcept;
-
-// Dialog Data
-#ifdef AFX_DESIGN_TIME
-	enum { IDD = IDD_ABOUTBOX };
-#endif
-
-protected:
-	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV support
-
-// Implementation
-protected:
-	DECLARE_MESSAGE_MAP()
-};
-
-CAboutDlg::CAboutDlg() noexcept : CDialogEx(IDD_ABOUTBOX)
-{
-}
-
-void CAboutDlg::DoDataExchange(CDataExchange* pDX)
-{
-	CDialogEx::DoDataExchange(pDX);
-}
-
-BEGIN_MESSAGE_MAP(CAboutDlg, CDialogEx)
-END_MESSAGE_MAP()
-
-// App command to run the dialog
-void UDPCameraStreamApp::OnAppAbout()
-{
-	CAboutDlg aboutDlg;
-	aboutDlg.DoModal();
-}
-
-// CudpcamerastreamApp message handlers
-
-
-
