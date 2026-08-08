@@ -73,7 +73,7 @@ bool Communicator::sendData(const char* data, const size_t dataLen)
 
 // buffer size must be large enough to receive all data
 // contained in a socket
-int Communicator::receiveData(std::vector<unsigned char>& buffer, bool* isTimeout = nullptr)
+int Communicator::receiveData(DataBuffer& buffer, bool* isTimeout = nullptr)
 {
 	sockaddr_in from;
 	int fromLen = sizeof(from);
@@ -95,27 +95,28 @@ bool Communicator::sendCmdConnectToServer()
 
 bool Communicator::sendCmdSetColorDepth(uint8_t colorDepth)
 {
-	std::vector<char> buf(2);
+	std::vector<char> buf(CMD_SEND_COLOR_DEPTH_TO_SERVER_SIZE);
 	buf[0] = char(CMD_SEND_COLOR_DEPTH_TO_SERVER);
 	buf[1] = char(colorDepth);
 
 	return sendData(buf.data(), buf.size());
 }
 
-bool Communicator::sendCmdSetSkipRows(uint8_t colorDepth)
+bool Communicator::sendCmdSetSkipRows(uint8_t skipRows)
 {
-	std::vector<char> buf(2);
+	std::vector<char> buf(CMD_SEND_SKIP_ROWS_TO_SERVER_SIZE);
 	buf[0] = char(CMD_SEND_SKIP_ROWS_TO_SERVER);
-	buf[1] = char(colorDepth);
+	buf[1] = char(skipRows);
 
 	return sendData(buf.data(), buf.size());
 }
 
 bool Communicator::sendCmdSetMinPacketSize(uint16_t packetSize)
 {
-	std::vector<char> buf(2);
-	buf[0] = char(CMD_SEND_SKIP_ROWS_TO_SERVER);
-	buf[1] = char(packetSize);
+	std::vector<char> buf(CMD_SEND_MIN_PACKET_SIZE_TO_SERVER_SIZE);
+	buf[0] = char(CMD_SEND_MIN_PACKET_SIZE_TO_SERVER);
+	buf[1] = char(packetSize >> 8);
+	buf[2] = char(packetSize & 0xFF);
 
 	return sendData(buf.data(), buf.size());
 }

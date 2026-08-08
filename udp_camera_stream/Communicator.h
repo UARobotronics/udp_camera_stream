@@ -6,6 +6,7 @@
 #include "WinSock2.h"
 
 #include "Command.h"
+#include "Common.h"
 
 enum class PeerType
 {
@@ -25,7 +26,7 @@ public:
 	void resetSocketTimeout();
 
 	bool sendData(const char* data, const size_t dataLen);
-	int receiveData(std::vector<unsigned char>& buffer, bool* isTimeout);
+	int receiveData(DataBuffer& buffer, bool* isTimeout);
 
 	bool sendCmdConnectToServer();
 	bool sendCmdSetColorDepth(uint8_t colorDepth);

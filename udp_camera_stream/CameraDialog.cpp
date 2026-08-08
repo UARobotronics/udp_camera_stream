@@ -9,6 +9,7 @@
 #include "udp_camera_stream.h"
 
 constexpr UINT WM_PACKET_RECEIVED = WM_APP + 1;
+constexpr UINT WM_UPDATE_DIALOG_DATA_FROM_VARS = WM_APP + 2;
 
 const unsigned int R = 2;
 const unsigned int G = 1;
@@ -23,6 +24,13 @@ const std::string g_dstAddress = "192.168.50.122";
 const unsigned int g_dstPort = 6666;
 
 using namespace std::chrono_literals;
+
+BEGIN_MESSAGE_MAP(CCameraDialog, CDialogEx)
+	ON_WM_PAINT()
+	ON_CBN_SELCHANGE(IDC_COMBO_COLOR_DEPTH, &CCameraDialog::OnColorDepthElementChanged)
+	ON_MESSAGE(WM_PACKET_RECEIVED, &CCameraDialog::OnPacketReceived)
+	ON_MESSAGE(WM_UPDATE_DIALOG_DATA_FROM_VARS, &CCameraDialog::OnUpdateDialogDataFromVars)
+END_MESSAGE_MAP()
 
 CString colorDepthToString(uint8_t depth)
 {
@@ -45,17 +53,12 @@ CCameraDialog::CCameraDialog(CWnd* pParent)
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
 
-BEGIN_MESSAGE_MAP(CCameraDialog, CDialogEx)
-	ON_WM_PAINT()
-	ON_CBN_SELCHANGE(IDC_COMBO_COLOR_DEPTH, &CCameraDialog::OnColorDepthChanged)
-	ON_MESSAGE(WM_PACKET_RECEIVED, &CCameraDialog::OnPacketReceived)
-END_MESSAGE_MAP()
-
 void CCameraDialog::DoDataExchange(CDataExchange* pDX)
 {
 	CDialogEx::DoDataExchange(pDX);
 
 	DDX_Text(pDX, IDC_EDIT_SKIP_ROWS, m_skipRows);
+	DDX_Text(pDX, IDC_EDIT_MIN_PACKET_SIZE, m_minPacketSize);
 }
 
 BOOL CCameraDialog::OnInitDialog()
@@ -90,8 +93,10 @@ BOOL CCameraDialog::OnInitDialog()
 	}
 
 	m_pSkipRowsEdit = (CEdit*)GetDlgItem(IDC_EDIT_SKIP_ROWS);
-
 	m_pLogListBox = (CListBox*)GetDlgItem(IDC_LIST_LOG);
+	m_pFPSByFramesEdit = (CEdit*)GetDlgItem(IDC_EDIT_FPS_BY_FRAMES);
+	m_pFPSByRowsEdit = (CEdit*)GetDlgItem(IDC_EDIT_FPS_BY_ROWS);
+	m_pDataRateEdit = (CEdit*)GetDlgItem(IDC_EDIT_DATARATE);
 
 	m_image.Create(g_defImageWidth, g_defImageHeight, 24);
 
@@ -105,6 +110,7 @@ BOOL CCameraDialog::OnInitDialog()
 	m_communicator.setDestination(g_dstAddress, g_dstPort);
 	setState(State::ConnectToServer);
 
+	resetStream();
 	startWorkerThread();
 
 	return TRUE;
@@ -118,6 +124,9 @@ BOOL CCameraDialog::PreTranslateMessage(MSG* pMsg)
 
 		if (GetFocus() == GetDlgItem(IDC_EDIT_SKIP_ROWS))
 			OnSkipRowsChanged();
+
+		if (GetFocus() == GetDlgItem(IDC_EDIT_MIN_PACKET_SIZE))
+			OnMinPacketSizeChanged();
 
 		return TRUE; // still swallow Enter
 	}
@@ -137,6 +146,7 @@ void CCameraDialog::setState(State state)
 			m_communicator.resetSocketTimeout();
 			break;
 		case State::WaitConfirmation:
+		case State::WaitStreamParams:
 			m_communicator.setSocketTimeout(Timeouts::serverConfirmation);
 			break;
 		case State::ReceiveVideoStream:
@@ -145,6 +155,8 @@ void CCameraDialog::setState(State state)
 		default:
 			break;
 	}
+
+	m_stateSwitchTimestamp = std::chrono::system_clock::now();
 }
 
 void CCameraDialog::resetStream()
@@ -158,7 +170,21 @@ void CCameraDialog::resetStream()
 	m_globalFrameCount = 0;
 	m_FPSTotalRowCount = 0;
 
-	addLogString(_T("Stream is lost. Resetting..."));
+	addLogString(_T("Stream is interrupted. Resetting..."));
+}
+
+bool CCameraDialog::processStreamParams(const DataBuffer& data, int size)
+{
+	if (size != CMD_SEND_STREAM_PARAMS_TO_CLIENT_SIZE)
+		return false;
+
+	m_colorDepth = data[1];
+	m_skipRows = data[2];
+	m_minPacketSize = (data[3] << 8) + data[4];
+
+	::PostMessage(m_hWnd, WM_UPDATE_DIALOG_DATA_FROM_VARS, 0, 0);
+
+	return true;
 }
 
 void CCameraDialog::startWorkerThread()
@@ -168,7 +194,7 @@ void CCameraDialog::startWorkerThread()
 
 void CCameraDialog::processCommunication()
 {
-	std::vector<unsigned char> buf(g_bufLength);
+	DataBuffer buf(g_bufLength);
 	uint32_t packetCount = 0;
 
 	try
@@ -177,6 +203,8 @@ void CCameraDialog::processCommunication()
 		{
 			int recvLen;
 			bool timeout = false;
+			auto now = std::chrono::system_clock::now();
+			auto lastSwitchDelay = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_stateSwitchTimestamp).count();
 
 			switch (m_state)
 			{
@@ -188,7 +216,7 @@ void CCameraDialog::processCommunication()
 			case State::WaitConfirmation:
 				recvLen = m_communicator.receiveData(buf, &timeout);
 				
-				if (timeout)
+				if (timeout || (lastSwitchDelay > Timeouts::serverConfirmation))
 				{
 					// No confirmation received within specified interval. Try again.
 					setState(State::ConnectToServer);
@@ -199,6 +227,24 @@ void CCameraDialog::processCommunication()
 					break;
 
 				if (buf[0] != CMD_SEND_ACK_TO_CLIENT)
+					break;
+
+				setState(State::WaitStreamParams);
+
+				break;
+			case State::WaitStreamParams:
+				recvLen = m_communicator.receiveData(buf, &timeout);
+
+				if (timeout || (lastSwitchDelay > Timeouts::serverConfirmation))
+				{
+					setState(State::ConnectToServer);
+					break;
+				}
+
+				if (recvLen != CMD_SEND_STREAM_PARAMS_TO_CLIENT_SIZE)
+					break;
+
+				if (!processStreamParams(buf, recvLen))
 					break;
 
 				setState(State::ReceiveVideoStream);
@@ -216,13 +262,14 @@ void CCameraDialog::processCommunication()
 					break;
 				}
 
-				// push the received packet (copy only the bytes received)
-				std::vector<unsigned char> packet(buf.begin(), buf.begin() + recvLen);
+				if (recvLen < 0)
+					break;
+
+				DataBuffer packet(buf.begin(), buf.begin() + recvLen);
 				{
 					std::lock_guard<std::mutex> lock(m_queueMutex);
 					m_frameQueue.push(std::move(packet));
 				}
-
 				// notify UI thread that a frame (or packet) is ready
 				if (m_hWnd)
 					::PostMessage(m_hWnd, WM_PACKET_RECEIVED, 0, 0);
@@ -266,7 +313,7 @@ void CCameraDialog::incCurRow(int increment, int* minRow, int* maxRow)
 		m_curRow = 0;
 }
 
-bool CCameraDialog::parsePacketHeader(const std::vector<unsigned char>& data, uint16_t& frame, uint16_t& row, uint8_t& flags, uint8_t& skipRows, uint8_t& colorDepth)
+bool CCameraDialog::parsePacketHeader(const DataBuffer& data, uint16_t& frame, uint16_t& row, uint8_t& flags, uint8_t& skipRows, uint8_t& colorDepth)
 {
 	if (data.size() < g_packetHeaderSize)
 		return false;
@@ -285,20 +332,42 @@ void CCameraDialog::OnOK()
 {
 }
 
-void CCameraDialog::OnColorDepthChanged()
+void CCameraDialog::OnColorDepthElementChanged()
 {
-	if (m_pColorDepthComboBox)
-	{
-		int ind = m_pColorDepthComboBox->GetCurSel();
-		m_colorDepth = m_pColorDepthComboBox->GetItemData(ind);
+	if (!m_pColorDepthComboBox)
+		return;
 
-		m_communicator.sendCmdSetColorDepth(m_colorDepth);
+	int ind = m_pColorDepthComboBox->GetCurSel();
+	m_colorDepth = m_pColorDepthComboBox->GetItemData(ind);
+
+	m_communicator.sendCmdSetColorDepth(m_colorDepth);
+}
+
+void CCameraDialog::OnColorDepthValueChanged()
+{
+	if (!m_pColorDepthComboBox)
+		return;
+
+	for (int ind = m_pColorDepthComboBox->GetCount() - 1; ind >= 0; --ind)
+	{
+		if (m_pColorDepthComboBox->GetItemData(ind) == m_colorDepth)
+		{
+			m_pColorDepthComboBox->SetCurSel(ind);
+			return;
+		}
 	}
+
+	m_pColorDepthComboBox->SetCurSel(0);
 }
 
 void CCameraDialog::OnSkipRowsChanged()
 {
 	m_communicator.sendCmdSetSkipRows(m_skipRows);
+}
+
+void CCameraDialog::OnMinPacketSizeChanged()
+{
+	m_communicator.sendCmdSetMinPacketSize(m_minPacketSize);
 }
 
 LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
@@ -313,17 +382,38 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 	{
 		m_globalFrameCount += m_frameCount;
 
-		auto globalDuration = std::chrono::duration_cast<std::chrono::seconds>(now - m_startGlobalFPSTimestamp).count();
-		unsigned int globalFPS = m_globalFrameCount / globalDuration;
+		auto globalDuration = std::chrono::duration_cast<std::chrono::seconds>(now - m_startFPSTimestamp).count();
+		unsigned int FPSByFrame = m_frameCount / globalDuration;
+
+		CString str;
+
+		if (m_pFPSByFramesEdit)
+		{
+			str.Format(_T("%d"), FPSByFrame);
+			m_pFPSByFramesEdit->SetWindowText(str);
+		}
+
+		if (m_pFPSByRowsEdit)
+		{
+			str.Format(_T("%d"), m_FPSTotalRowCount / m_height);
+			m_pFPSByRowsEdit->SetWindowText(str);
+		}
+
+		if (m_pDataRateEdit)
+		{
+			str.Format(_T("%f"), (float)m_dataBitsCount / (1024 * 1024));
+			m_pDataRateEdit->SetWindowTextW(str);
+		}
 
 		CString fps;
-		fps.Format(_T("FPS: %d / %d"), /*m_frameCount, */m_FPSTotalRowCount / m_height, globalFPS/*, duration*/);
+		fps.Format(_T("FPS: %d / %d"), /*m_frameCount, */m_FPSTotalRowCount / m_height, FPSByFrame/*, duration*/);
 		//m_logList.AddString(fps);
 		//addLogString(fps);
 
 		m_startFPSTimestamp = now;
 		m_frameCount = 0;
 		m_FPSTotalRowCount = 0;
+		m_dataBitsCount = 0;
 	}
 
 	//if ((m_frameQueue.size() > 0) && (m_frameQueue.size() < 10))
@@ -336,7 +426,7 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 
 	//return 0;
 
-	std::queue<std::vector<unsigned char>> dataQueue;
+	std::queue<DataBuffer> dataQueue;
 	{
 		std::lock_guard<std::mutex> lock(m_queueMutex);
 		std::swap(m_frameQueue, dataQueue);
@@ -349,7 +439,7 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 		int minRow = std::numeric_limits<int>::max();
 		while (!dataQueue.empty())
 		{
-			std::vector<unsigned char> data = dataQueue.front();
+			DataBuffer data = dataQueue.front();
 			dataQueue.pop();
 
 			int width = m_image.GetWidth();
@@ -421,6 +511,8 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 			int colorSmooth = 1 << colorDepth;
 			int maxLuminance = 256 - colorSmooth;
 
+			m_dataBitsCount += (dataSize - g_packetHeaderSize) * 8;
+
 			for (size_t dataInd = g_packetHeaderSize; dataInd < dataSize; dataInd += 1)
 			{
 				uint8_t dataByte = data[dataInd];
@@ -464,6 +556,15 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 		//CRect dirtyRect(0, minRow - 1, m_width, maxRow + 1);
 		//InvalidateRect(&dirtyRect, FALSE);
 	}
+
+	return 0;
+}
+
+LRESULT CCameraDialog::OnUpdateDialogDataFromVars(WPARAM /*wParam*/, LPARAM /*lParam*/)
+{
+	UpdateData(FALSE);
+
+	OnColorDepthValueChanged();
 
 	return 0;
 }
