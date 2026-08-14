@@ -16,11 +16,13 @@ const unsigned int G = 1;
 const unsigned int B = 0;
 
 const int g_bufLength = 65536;
-const unsigned int g_defImageWidth = 800;
-const unsigned int g_defImageHeight = 600;
+const int g_defImageWidth = 800;
+const int g_defImageHeight = 600;
 const unsigned int g_packetHeaderSize = 4;
 
-const std::string g_dstAddress = "192.168.50.122";
+//const std::string g_dstAddress = "192.168.50.122";
+//const std::string g_dstAddress = "10.99.9.122";
+const std::string g_dstAddress = "192.168.50.238"; // Mikrotik IP
 const unsigned int g_dstPort = 6666;
 
 using namespace std::chrono_literals;
@@ -98,7 +100,8 @@ BOOL CCameraDialog::OnInitDialog()
 	m_pFPSByRowsEdit = (CEdit*)GetDlgItem(IDC_EDIT_FPS_BY_ROWS);
 	m_pDataRateEdit = (CEdit*)GetDlgItem(IDC_EDIT_DATARATE);
 
-	m_image.Create(g_defImageWidth, g_defImageHeight, 24);
+	// Height is negative to create top-down image
+	m_image.Create(g_defImageWidth, -g_defImageHeight, 24);
 
 	m_width = g_defImageWidth;
 	m_height = g_defImageHeight;
@@ -416,16 +419,6 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 		m_dataBitsCount = 0;
 	}
 
-	//if ((m_frameQueue.size() > 0) && (m_frameQueue.size() < 10))
-	//{
-	//	CString str;
-	//	str.Format(_T("Packets in queue: %d"), m_frameQueue.size());
-	//	m_logList.AddString(str);
-	//  addLogString(str);
-	//}
-
-	//return 0;
-
 	std::queue<DataBuffer> dataQueue;
 	{
 		std::lock_guard<std::mutex> lock(m_queueMutex);
@@ -452,24 +445,9 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 			uint16_t curFrame;
 
 			static uint16_t prevRow = 0;
-			static uint8_t prevColorDepth = uint8_t(ColorDepth::_8_BITS);
-			static uint8_t prevSkipRows = 0;
 			static uint16_t prevCurFrame = 0;
 			if (!parsePacketHeader(data, curFrame, m_curRow, flags, skipRows, colorDepth))
 				continue;
-
-			if (prevColorDepth != colorDepth)
-			{
-				CString strDepth = colorDepthToString(colorDepth);
-				//addLogString(strDepth);
-			}
-
-			if (prevSkipRows != skipRows)
-			{
-				CString strRows;
-				strRows.Format(_T("Now skipping %d rows every frame"), skipRows);
-				//addLogString(strRows);
-			}
 
 			if ((m_curRow > 0) && (prevRow != m_curRow - 1))
 			{
@@ -493,8 +471,6 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 			}
 
 			prevRow = m_curRow;
-			prevColorDepth = colorDepth;
-			prevSkipRows = skipRows;
 			prevCurFrame = curFrame;
 
 			if (skip)
@@ -533,13 +509,7 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 						rowShift = m_curRow * pitch;
 					}
 
-					size_t pixelShift = rowShift + 3 * curCol;
-
-					//Color color = getColor(curCol, data[dataInd]);
-
-					//pixels[pixelShift + R] = color.R;
-					//pixels[pixelShift + G] = color.G;
-					//pixels[pixelShift + B] = color.B;
+					size_t pixelShift = rowShift + curCol * 3;
 
 					pixels[pixelShift + R] = luminance;
 					pixels[pixelShift + G] = luminance;
