@@ -31,7 +31,7 @@ protected:
 	LRESULT OnUpdateDialogDataFromVars(WPARAM /*wParam*/, LPARAM /*lParam*/);
 
 	afx_msg void OnPaint();
-	afx_msg void PreTranslateMsg();
+	afx_msg void OnClickedSmoothImage();
 
 	DECLARE_MESSAGE_MAP()
 
@@ -51,6 +51,8 @@ private:
 	int m_colorDepth = 0;
 	int m_skipRows = 0;
 	int m_minPacketSize = 0;
+	bool m_bSmoothImage = false;
+
 	std::thread m_thread;
 	Communicator m_communicator;
 	State m_state = State::Undefined;
@@ -78,4 +80,5 @@ private:
 	CEdit* m_pFPSByFramesEdit = nullptr;
 	CEdit* m_pFPSByRowsEdit = nullptr;
 	CEdit* m_pDataRateEdit = nullptr;
+	CButton* m_pSmoothCheckBox = nullptr;
 };

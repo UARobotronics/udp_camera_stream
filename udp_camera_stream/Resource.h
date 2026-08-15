@@ -22,6 +22,8 @@
 #define IDC_STATIC_DATARATE             1013
 #define IDC_EDIT_FPS_BY_ROWS            1014
 #define IDC_STATIC_FPS_BY_ROWS          1015
+#define IDC_STATIC_POST_PROCESS_PARAMS  1016
+#define IDC_CHECK_FIRST_FRAME_SMOOTH    1017
 
 // Next default values for new objects
 // 
@@ -29,7 +31,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        311
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         1014
+#define _APS_NEXT_CONTROL_VALUE         1018
 #define _APS_NEXT_SYMED_VALUE           310
 #endif
 #endif

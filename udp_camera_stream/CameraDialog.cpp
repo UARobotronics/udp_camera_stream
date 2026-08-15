@@ -30,6 +30,7 @@ using namespace std::chrono_literals;
 BEGIN_MESSAGE_MAP(CCameraDialog, CDialogEx)
 	ON_WM_PAINT()
 	ON_CBN_SELCHANGE(IDC_COMBO_COLOR_DEPTH, &CCameraDialog::OnColorDepthElementChanged)
+	ON_BN_CLICKED(IDC_CHECK_FIRST_FRAME_SMOOTH, &CCameraDialog::OnClickedSmoothImage)
 	ON_MESSAGE(WM_PACKET_RECEIVED, &CCameraDialog::OnPacketReceived)
 	ON_MESSAGE(WM_UPDATE_DIALOG_DATA_FROM_VARS, &CCameraDialog::OnUpdateDialogDataFromVars)
 END_MESSAGE_MAP()
@@ -99,6 +100,7 @@ BOOL CCameraDialog::OnInitDialog()
 	m_pFPSByFramesEdit = (CEdit*)GetDlgItem(IDC_EDIT_FPS_BY_FRAMES);
 	m_pFPSByRowsEdit = (CEdit*)GetDlgItem(IDC_EDIT_FPS_BY_ROWS);
 	m_pDataRateEdit = (CEdit*)GetDlgItem(IDC_EDIT_DATARATE);
+	m_pSmoothCheckBox = (CButton*)GetDlgItem(IDC_CHECK_FIRST_FRAME_SMOOTH);
 
 	// Height is negative to create top-down image
 	m_image.Create(g_defImageWidth, -g_defImageHeight, 24);
@@ -515,6 +517,42 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 					pixels[pixelShift + G] = luminance;
 					pixels[pixelShift + B] = luminance;
 
+					if (m_bSmoothImage)
+					{
+						//if ((curFrame + m_curRow) % (skipRows + 1) == 0)
+						if (m_curRow % (skipRows + 1) == 0)
+						{
+							switch (skipRows)
+							{
+							case 1:
+							case 2:
+							case 3:
+							case 4:
+								if ((m_curRow > 0) && (m_curRow < m_height) && (curCol > 1) && (curCol < m_width - 2))
+								{
+									uint16_t prevRow = m_curRow - skipRows - 1;
+									size_t prevPixelInd = pixelShift - (skipRows + 1) /*row*/ * pitch;
+									uint8_t prevLuminance = pixels[prevPixelInd + R];
+
+									for (int i = 1; i < skipRows + 1; ++i)
+									{
+										//size_t blendPixelInd = pixelShift - 1 /*row*/ * pitch - 1 /*column*/ * 3;
+										size_t blendPixelInd = pixelShift - i /*row*/ * pitch;
+										uint16_t blendLuminance = ((skipRows + 1 - i) * luminance + i * prevLuminance) / (skipRows + 1);
+
+										pixels[blendPixelInd + R] = blendLuminance;
+										pixels[blendPixelInd + G] = blendLuminance;
+										pixels[blendPixelInd + B] = blendLuminance;
+									}
+								}
+
+								break;
+							default:
+								break;
+							}
+						}
+					}
+
 					++curCol;
 				}
 			}
@@ -568,4 +606,10 @@ void CCameraDialog::OnPaint()
 
 		CDialogEx::OnPaint();
 	}
+}
+
+void CCameraDialog::OnClickedSmoothImage()
+{
+	if (m_pSmoothCheckBox)
+		m_bSmoothImage = (m_pSmoothCheckBox->GetCheck() == BST_CHECKED);
 }
