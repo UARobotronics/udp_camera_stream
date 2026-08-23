@@ -478,6 +478,9 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 			DataBuffer data = dataQueue.front();
 			dataQueue.pop();
 
+			if (data.size() < m_minPacketSize)
+				continue;
+
 			int width = m_image.GetWidth();
 			int height = m_image.GetHeight();
 			int pitch = m_image.GetPitch();
