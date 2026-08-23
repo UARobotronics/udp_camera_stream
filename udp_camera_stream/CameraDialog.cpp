@@ -18,8 +18,9 @@ const unsigned int B = 0;
 const int g_bufLength = 65536;
 const int g_defImageWidth = 800;
 const int g_defImageHeight = 600;
-const unsigned int g_packetHeaderSize = 4;
+const unsigned int g_dataHeaderSize = 4;
 const int g_maxFrameValue = 1 << 13 - 1;
+const unsigned int g_packetHeaderSize = 42; // UDP and IP network packet headers
 
 const bool g_addDebugInfo = true;
 const size_t g_DebugInfoReserve = 50000;
@@ -106,6 +107,7 @@ BOOL CCameraDialog::OnInitDialog()
 	m_pFPSByFramesEdit = (CEdit*)GetDlgItem(IDC_EDIT_FPS_BY_FRAMES);
 	m_pFPSByRowsEdit = (CEdit*)GetDlgItem(IDC_EDIT_FPS_BY_ROWS);
 	m_pDataRateEdit = (CEdit*)GetDlgItem(IDC_EDIT_DATARATE);
+	m_pFullDataRateEdit = (CEdit*)GetDlgItem(IDC_EDIT_FULL_DATARATE);
 	m_pDataLossEdit = (CEdit*)GetDlgItem(IDC_EDIT_DATA_LOSS);
 
 	// Height is negative to create top-down image
@@ -379,6 +381,12 @@ void CCameraDialog::onMeasurePeriodFinished()
 		m_pDataRateEdit->SetWindowTextW(str);
 	}
 
+	if (m_pFullDataRateEdit)
+	{
+		str.Format(_T("%f"), (float)m_fullDataBitsCount / (1024 * 1024));
+		m_pFullDataRateEdit->SetWindowTextW(str);
+	}
+
 	if (m_pDataLossEdit)
 	{
 		float rowCount = m_wholeFramesRowCount - m_currentFrameRowCount;
@@ -393,11 +401,12 @@ void CCameraDialog::onMeasurePeriodFinished()
 	m_FPSTotalRowCount = 0;
 	m_wholeFramesRowCount = 0;
 	m_dataBitsCount = 0;
+	m_fullDataBitsCount = 0;
 }
 
 bool CCameraDialog::parsePacketHeader(const DataBuffer& data, FrameIndex& frame, RowIndex& row, uint8_t& flags, RowIndex& skipRows, uint8_t& colorDepth)
 {
-	if (data.size() < g_packetHeaderSize)
+	if (data.size() < g_dataHeaderSize)
 		return false;
 
 	frame = ((uint16_t)(data[0]) << 5) + ((uint16_t)(data[1]) >> 3);
@@ -477,6 +486,11 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 		{
 			DataBuffer data = dataQueue.front();
 			dataQueue.pop();
+			size_t dataSize = data.size();
+
+			unsigned int newImageBitsCount = (dataSize - g_dataHeaderSize) * 8;
+			m_dataBitsCount += newImageBitsCount;
+			m_fullDataBitsCount += newImageBitsCount + g_packetHeaderSize * 8;
 
 			if (data.size() < m_minPacketSize)
 				continue;
@@ -525,15 +539,12 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 
 			size_t rowShift = m_curRow * pitch;
 			size_t curCol = 0;
-			size_t dataSize = data.size();
 			int rowPixels = 0;
 
 			int colorSmooth = 1 << colorDepth;
 			int maxLuminance = 256 - colorSmooth;
 
-			m_dataBitsCount += (dataSize - g_packetHeaderSize) * 8;
-
-			for (size_t dataInd = g_packetHeaderSize; dataInd < dataSize; dataInd += 1)
+			for (size_t dataInd = g_dataHeaderSize; dataInd < dataSize; dataInd += 1)
 			{
 				uint8_t dataByte = data[dataInd];
 

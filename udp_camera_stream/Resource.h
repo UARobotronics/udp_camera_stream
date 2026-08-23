@@ -26,6 +26,8 @@
 #define IDC_CHECK_FIRST_FRAME_SMOOTH    1017
 #define IDC_EDIT_DATA_LOSS              1018
 #define IDC_STATIC_DATA_LOSS            1019
+#define IDC_EDIT_FULL_DATARATE          1020
+#define IDC_STATIC_FULL_DATARATE        1021
 
 // Next default values for new objects
 // 
@@ -33,7 +35,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        311
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         1020
+#define _APS_NEXT_CONTROL_VALUE         1022
 #define _APS_NEXT_SYMED_VALUE           310
 #endif
 #endif

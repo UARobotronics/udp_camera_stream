@@ -79,6 +79,7 @@ private:
 	unsigned int m_wholeFramesRowCount = 0;
 	unsigned int m_currentFrameRowCount = 0;
 	unsigned int m_dataBitsCount = 0;
+	unsigned int m_fullDataBitsCount = 0;
 
 private:
 	CComboBox* m_pColorDepthComboBox = nullptr;
@@ -89,5 +90,6 @@ private:
 	CEdit* m_pFPSByFramesEdit = nullptr;
 	CEdit* m_pFPSByRowsEdit = nullptr;
 	CEdit* m_pDataRateEdit = nullptr;
+	CEdit* m_pFullDataRateEdit = nullptr;
 	CEdit* m_pDataLossEdit = nullptr;
 };
