@@ -1,5 +1,9 @@
 #pragma once
 
+using DataBuffer = std::vector<unsigned char>;
+using RowIndex = uint16_t;
+using FrameIndex = uint16_t;
+
 enum class State
 {
 	Undefined = 0,
@@ -15,4 +19,7 @@ struct Timeouts
 	static const int newDataPacket = 3000;
 };
 
-using DataBuffer = std::vector<unsigned char>;
+struct DebugInfo
+{
+	std::vector <std::pair <FrameIndex, RowIndex>> packetData;
+};

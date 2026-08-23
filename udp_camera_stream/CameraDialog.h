@@ -36,6 +36,7 @@ protected:
 	DECLARE_MESSAGE_MAP()
 
 	void setState(State state);
+	void initStreamData();
 	void resetStream();
 
 	bool processStreamParams(const DataBuffer& data, int size);
@@ -43,25 +44,29 @@ protected:
 	void processCommunication();
 	void addLogString(CString str);
 	void updateMinMaxRow(int* minRow, int* maxRow);
-	void incCurRow(int increment, int* minRow, int* maxRow);
-	bool parsePacketHeader(const DataBuffer& data, uint16_t& frame, uint16_t& row, uint8_t& flags, uint8_t& skipRows, uint8_t& format);
+	void onRowFinished(int increment, int* minRow, int* maxRow);
+	void onFrameFinished();
+	void onMeasurePeriodFinished();
+	bool parsePacketHeader(const DataBuffer& data, FrameIndex& frame, RowIndex& row, uint8_t& flags, RowIndex& skipRows, uint8_t& format);
 
 private:
 	CImage m_image;
 	int m_colorDepth = 0;
 	int m_skipRows = 0;
+	RowIndex m_packetSkipRows = 0;
 	int m_minPacketSize = 0;
 	bool m_bSmoothImage = false;
 
 	std::thread m_thread;
 	Communicator m_communicator;
+	DebugInfo debugInfo;
 	State m_state = State::Undefined;
 	std::mutex m_queueMutex;
 	std::queue<DataBuffer> m_frameQueue;
 
 	int m_width = 0;
 	int m_height = 0;
-	uint16_t m_curRow = 0;
+	RowIndex m_curRow = 0;
 
 	std::chrono::time_point<std::chrono::system_clock> m_lastPacketTimestamp{};
 	std::chrono::time_point<std::chrono::system_clock> m_startFPSTimestamp{};
@@ -71,14 +76,18 @@ private:
 	unsigned int m_frameCount = 0;
 	unsigned int m_globalFrameCount = 0;
 	unsigned int m_FPSTotalRowCount = 0;
+	unsigned int m_wholeFramesRowCount = 0;
+	unsigned int m_currentFrameRowCount = 0;
 	unsigned int m_dataBitsCount = 0;
 
 private:
 	CComboBox* m_pColorDepthComboBox = nullptr;
 	CEdit* m_pSkipRowsEdit = nullptr;
 	CListBox* m_pLogListBox = nullptr;
+	CButton* m_pSmoothCheckBox = nullptr;
+
 	CEdit* m_pFPSByFramesEdit = nullptr;
 	CEdit* m_pFPSByRowsEdit = nullptr;
 	CEdit* m_pDataRateEdit = nullptr;
-	CButton* m_pSmoothCheckBox = nullptr;
+	CEdit* m_pDataLossEdit = nullptr;
 };

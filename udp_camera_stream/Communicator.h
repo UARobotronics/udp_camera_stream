@@ -8,12 +8,6 @@
 #include "Command.h"
 #include "Common.h"
 
-enum class PeerType
-{
-	Server = 0,
-	Client = 1
-};
-
 class Communicator
 {
 public:

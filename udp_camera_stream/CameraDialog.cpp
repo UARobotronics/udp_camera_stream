@@ -19,8 +19,12 @@ const int g_bufLength = 65536;
 const int g_defImageWidth = 800;
 const int g_defImageHeight = 600;
 const unsigned int g_packetHeaderSize = 4;
+const int g_maxFrameValue = 1 << 13 - 1;
 
-//const std::string g_dstAddress = "192.168.50.122";
+const bool g_addDebugInfo = true;
+const size_t g_DebugInfoReserve = 50000;
+
+//const std::string g_dstAddress = "192.168.50.122"; // Direct server IP
 //const std::string g_dstAddress = "10.99.9.122";
 const std::string g_dstAddress = "192.168.50.238"; // Mikrotik IP
 const unsigned int g_dstPort = 6666;
@@ -97,10 +101,12 @@ BOOL CCameraDialog::OnInitDialog()
 
 	m_pSkipRowsEdit = (CEdit*)GetDlgItem(IDC_EDIT_SKIP_ROWS);
 	m_pLogListBox = (CListBox*)GetDlgItem(IDC_LIST_LOG);
+	m_pSmoothCheckBox = (CButton*)GetDlgItem(IDC_CHECK_FIRST_FRAME_SMOOTH);
+
 	m_pFPSByFramesEdit = (CEdit*)GetDlgItem(IDC_EDIT_FPS_BY_FRAMES);
 	m_pFPSByRowsEdit = (CEdit*)GetDlgItem(IDC_EDIT_FPS_BY_ROWS);
 	m_pDataRateEdit = (CEdit*)GetDlgItem(IDC_EDIT_DATARATE);
-	m_pSmoothCheckBox = (CButton*)GetDlgItem(IDC_CHECK_FIRST_FRAME_SMOOTH);
+	m_pDataLossEdit = (CEdit*)GetDlgItem(IDC_EDIT_DATA_LOSS);
 
 	// Height is negative to create top-down image
 	m_image.Create(g_defImageWidth, -g_defImageHeight, 24);
@@ -114,6 +120,8 @@ BOOL CCameraDialog::OnInitDialog()
 
 	m_communicator.setDestination(g_dstAddress, g_dstPort);
 	setState(State::ConnectToServer);
+
+	debugInfo.packetData.reserve(g_DebugInfoReserve);
 
 	resetStream();
 	startWorkerThread();
@@ -164,7 +172,7 @@ void CCameraDialog::setState(State state)
 	m_stateSwitchTimestamp = std::chrono::system_clock::now();
 }
 
-void CCameraDialog::resetStream()
+void CCameraDialog::initStreamData()
 {
 	auto now = std::chrono::system_clock::now();
 
@@ -174,6 +182,11 @@ void CCameraDialog::resetStream()
 	m_frameCount = 0;
 	m_globalFrameCount = 0;
 	m_FPSTotalRowCount = 0;
+}
+
+void CCameraDialog::resetStream()
+{
+	initStreamData();
 
 	addLogString(_T("Stream is interrupted. Resetting..."));
 }
@@ -252,6 +265,8 @@ void CCameraDialog::processCommunication()
 				if (!processStreamParams(buf, recvLen))
 					break;
 
+				initStreamData();
+
 				setState(State::ReceiveVideoStream);
 
 				break;
@@ -304,21 +319,83 @@ void CCameraDialog::updateMinMaxRow(int* minRow, int* maxRow)
 		*minRow = m_curRow;
 	if (m_curRow > *maxRow)
 		*maxRow = m_curRow;
-
-	++m_FPSTotalRowCount;
 }
 
-void CCameraDialog::incCurRow(int increment, int* minRow, int* maxRow)
+void CCameraDialog::onRowFinished(int increment, int* minRow, int* maxRow)
 {
 	updateMinMaxRow(minRow, maxRow);
 
 	m_curRow += increment;
 
 	if (m_curRow >= m_height)
-		m_curRow = 0;
+	{
+		m_curRow -= m_height;
+		onFrameFinished();
+	}
+
+	++m_FPSTotalRowCount;
+	++m_currentFrameRowCount;
+
+	if (m_frameCount > 0)
+		++m_wholeFramesRowCount;
 }
 
-bool CCameraDialog::parsePacketHeader(const DataBuffer& data, uint16_t& frame, uint16_t& row, uint8_t& flags, uint8_t& skipRows, uint8_t& colorDepth)
+void CCameraDialog::onFrameFinished()
+{
+	++m_frameCount;
+
+	m_currentFrameRowCount = 0;
+
+	CRect dirtyRect(0, 0, m_width, m_height);
+	InvalidateRect(&dirtyRect, FALSE);
+	UpdateWindow();
+}
+
+void CCameraDialog::onMeasurePeriodFinished()
+{
+	auto now = std::chrono::system_clock::now();
+
+	auto globalDuration = std::chrono::duration_cast<std::chrono::seconds>(now - m_startFPSTimestamp).count();
+	unsigned int FPSByFrame = m_frameCount / globalDuration;
+	m_globalFrameCount += m_frameCount;
+
+	CString str;
+
+	if (m_pFPSByFramesEdit)
+	{
+		str.Format(_T("%d"), FPSByFrame);
+		m_pFPSByFramesEdit->SetWindowText(str);
+	}
+
+	if (m_pFPSByRowsEdit)
+	{
+		str.Format(_T("%d"), m_FPSTotalRowCount / m_height);
+		m_pFPSByRowsEdit->SetWindowText(str);
+	}
+
+	if (m_pDataRateEdit)
+	{
+		str.Format(_T("%f"), (float)m_dataBitsCount / (1024 * 1024));
+		m_pDataRateEdit->SetWindowTextW(str);
+	}
+
+	if (m_pDataLossEdit)
+	{
+		float rowCount = m_wholeFramesRowCount - m_currentFrameRowCount;
+		float expectedRowCount = (float)(m_frameCount - 1) * m_height / (m_packetSkipRows + 1);
+		float lossPercent = 100.0 - (rowCount / expectedRowCount) * 100.0;
+		str.Format(_T("%f"), (float)lossPercent);
+		m_pDataLossEdit->SetWindowTextW(str);
+	}
+
+	m_startFPSTimestamp = now;
+	m_frameCount = 0;
+	m_FPSTotalRowCount = 0;
+	m_wholeFramesRowCount = 0;
+	m_dataBitsCount = 0;
+}
+
+bool CCameraDialog::parsePacketHeader(const DataBuffer& data, FrameIndex& frame, RowIndex& row, uint8_t& flags, RowIndex& skipRows, uint8_t& colorDepth)
 {
 	if (data.size() < g_packetHeaderSize)
 		return false;
@@ -382,44 +459,8 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 	m_lastPacketTimestamp = now;
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_startFPSTimestamp).count();
 
-	// Output FPS every second
 	if (duration > 1000)
-	{
-		m_globalFrameCount += m_frameCount;
-
-		auto globalDuration = std::chrono::duration_cast<std::chrono::seconds>(now - m_startFPSTimestamp).count();
-		unsigned int FPSByFrame = m_frameCount / globalDuration;
-
-		CString str;
-
-		if (m_pFPSByFramesEdit)
-		{
-			str.Format(_T("%d"), FPSByFrame);
-			m_pFPSByFramesEdit->SetWindowText(str);
-		}
-
-		if (m_pFPSByRowsEdit)
-		{
-			str.Format(_T("%d"), m_FPSTotalRowCount / m_height);
-			m_pFPSByRowsEdit->SetWindowText(str);
-		}
-
-		if (m_pDataRateEdit)
-		{
-			str.Format(_T("%f"), (float)m_dataBitsCount / (1024 * 1024));
-			m_pDataRateEdit->SetWindowTextW(str);
-		}
-
-		CString fps;
-		fps.Format(_T("FPS: %d / %d"), /*m_frameCount, */m_FPSTotalRowCount / m_height, FPSByFrame/*, duration*/);
-		//m_logList.AddString(fps);
-		//addLogString(fps);
-
-		m_startFPSTimestamp = now;
-		m_frameCount = 0;
-		m_FPSTotalRowCount = 0;
-		m_dataBitsCount = 0;
-	}
+		onMeasurePeriodFinished();
 
 	std::queue<DataBuffer> dataQueue;
 	{
@@ -443,13 +484,18 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 
 			uint8_t flags;
 			uint8_t colorDepth;
-			uint8_t skipRows;
-			uint16_t curFrame;
+			FrameIndex curFrame;
 
-			static uint16_t prevRow = 0;
-			static uint16_t prevCurFrame = 0;
-			if (!parsePacketHeader(data, curFrame, m_curRow, flags, skipRows, colorDepth))
+			static RowIndex prevRow = 0;
+			static FrameIndex prevCurFrame = 0;
+			RowIndex frameCurRow;
+			if (!parsePacketHeader(data, curFrame, frameCurRow, flags, m_packetSkipRows, colorDepth))
 				continue;
+
+			if ((frameCurRow < m_curRow) && (m_curRow - frameCurRow > m_height / 2))
+				onFrameFinished();
+
+			m_curRow = frameCurRow;
 
 			if ((m_curRow > 0) && (prevRow != m_curRow - 1))
 			{
@@ -459,27 +505,20 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 			}
 
 			bool skip = false;
-			if (prevCurFrame > curFrame)
+			if ((prevCurFrame > curFrame) && (prevCurFrame - curFrame < 500))
 				skip = true;
 
-			if (m_curRow < prevRow)
-			{
-				// New frame has started
-				++m_frameCount;
-
-				CRect dirtyRect(0, 0, m_width, m_height);
-				InvalidateRect(&dirtyRect, FALSE);
-				UpdateWindow();
-			}
-
-			prevRow = m_curRow;
-			prevCurFrame = curFrame;
+			//if (m_curRow < prevRow)
+			//	onFrameFinished();
 
 			if (skip)
 				continue;
 
 			if (m_curRow >= m_height)
 				continue;
+
+			prevRow = m_curRow;
+			prevCurFrame = curFrame;
 
 			size_t rowShift = m_curRow * pitch;
 			size_t curCol = 0;
@@ -502,15 +541,6 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 				luminance = (float)(luminance) / maxLuminance * 255;
 				for (int i = 0; i < count; ++i)
 				{
-					if (curCol >= m_width)
-					{
-						rowPixels = 0;
-						curCol = 0;
-
-						incCurRow(skipRows + 1, &minRow, &maxRow);
-						rowShift = m_curRow * pitch;
-					}
-
 					size_t pixelShift = rowShift + curCol * 3;
 
 					pixels[pixelShift + R] = luminance;
@@ -520,9 +550,9 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 					if (m_bSmoothImage)
 					{
 						//if ((curFrame + m_curRow) % (skipRows + 1) == 0)
-						if (m_curRow % (skipRows + 1) == 0)
+						if (m_curRow % (m_packetSkipRows + 1) == 0)
 						{
-							switch (skipRows)
+							switch (m_packetSkipRows)
 							{
 							case 1:
 							case 2:
@@ -530,15 +560,15 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 							case 4:
 								if ((m_curRow > 0) && (m_curRow < m_height) && (curCol > 1) && (curCol < m_width - 2))
 								{
-									uint16_t prevRow = m_curRow - skipRows - 1;
-									size_t prevPixelInd = pixelShift - (skipRows + 1) /*row*/ * pitch;
+									uint16_t prevRow = m_curRow - m_packetSkipRows - 1;
+									size_t prevPixelInd = pixelShift - (m_packetSkipRows + 1) /*row*/ * pitch;
 									uint8_t prevLuminance = pixels[prevPixelInd + R];
 
-									for (int i = 1; i < skipRows + 1; ++i)
+									for (int i = 1; i < m_packetSkipRows + 1; ++i)
 									{
 										//size_t blendPixelInd = pixelShift - 1 /*row*/ * pitch - 1 /*column*/ * 3;
 										size_t blendPixelInd = pixelShift - i /*row*/ * pitch;
-										uint16_t blendLuminance = ((skipRows + 1 - i) * luminance + i * prevLuminance) / (skipRows + 1);
+										uint16_t blendLuminance = ((m_packetSkipRows + 1 - i) * luminance + i * prevLuminance) / (m_packetSkipRows + 1);
 
 										pixels[blendPixelInd + R] = blendLuminance;
 										pixels[blendPixelInd + G] = blendLuminance;
@@ -554,10 +584,25 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 					}
 
 					++curCol;
+
+					if (curCol >= m_width)
+					{
+						rowPixels = 0;
+						curCol = 0;
+
+						onRowFinished(m_packetSkipRows + 1, &minRow, &maxRow);
+						rowShift = m_curRow * pitch;
+
+						if (g_addDebugInfo)
+							debugInfo.packetData.emplace_back(curFrame, m_curRow);
+					}
 				}
 			}
 
-			updateMinMaxRow(&minRow, &maxRow);
+			// In case if part of row data was lost, in the loop above it won't be
+			// treated as finished, so process its finishing here.
+			if (curCol > 0)
+				onRowFinished(m_packetSkipRows + 1, &minRow, &maxRow);
 		}
 
 		// Invalidate just updated area
