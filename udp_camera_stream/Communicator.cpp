@@ -121,6 +121,15 @@ bool Communicator::sendCmdSetMinPacketSize(uint16_t packetSize)
 	return sendData(buf.data(), buf.size());
 }
 
+bool Communicator::sendCmdSetTargetFPS(uint8_t fps)
+{
+	std::vector<char> buf(CMD_SEND_TARGET_FPS_TO_SERVER_SIZE);
+	buf[0] = char(CMD_SEND_TARGET_FPS_TO_SERVER);
+	buf[1] = char(fps);
+
+	return sendData(buf.data(), buf.size());
+}
+
 ULONG Communicator::getAddressByDNS(const std::string& dnsName)
 {
 	ULONG result = INADDR_NONE;

@@ -26,6 +26,7 @@ public:
 	bool sendCmdSetColorDepth(uint8_t colorDepth);
 	bool sendCmdSetSkipRows(uint8_t skipRows);
 	bool sendCmdSetMinPacketSize(uint16_t packetSize);
+	bool sendCmdSetTargetFPS(uint8_t fps);
 
 private:
 	ULONG getAddressByDNS(const std::string& dnsName);

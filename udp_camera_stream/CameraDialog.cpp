@@ -27,7 +27,7 @@ const size_t g_DebugInfoReserve = 50000;
 
 //const std::string g_dstAddress = "192.168.50.122"; // Direct server IP
 //const std::string g_dstAddress = "10.99.9.122";
-const std::string g_dstAddress = "192.168.50.238"; // Mikrotik IP
+const std::string g_dstAddress = "192.168.50.237"; // Mikrotik IP
 const unsigned int g_dstPort = 6666;
 
 using namespace std::chrono_literals;
@@ -67,6 +67,7 @@ void CCameraDialog::DoDataExchange(CDataExchange* pDX)
 
 	DDX_Text(pDX, IDC_EDIT_SKIP_ROWS, m_skipRows);
 	DDX_Text(pDX, IDC_EDIT_MIN_PACKET_SIZE, m_minPacketSize);
+	DDX_Text(pDX, IDC_EDIT_TARGET_FPS, m_targetFPS);
 }
 
 BOOL CCameraDialog::OnInitDialog()
@@ -101,6 +102,7 @@ BOOL CCameraDialog::OnInitDialog()
 	}
 
 	m_pSkipRowsEdit = (CEdit*)GetDlgItem(IDC_EDIT_SKIP_ROWS);
+	m_pTargetFPSEdit = (CEdit*)GetDlgItem(IDC_EDIT_TARGET_FPS);
 	m_pLogListBox = (CListBox*)GetDlgItem(IDC_LIST_LOG);
 	m_pSmoothCheckBox = (CButton*)GetDlgItem(IDC_CHECK_FIRST_FRAME_SMOOTH);
 
@@ -142,6 +144,9 @@ BOOL CCameraDialog::PreTranslateMessage(MSG* pMsg)
 
 		if (GetFocus() == GetDlgItem(IDC_EDIT_MIN_PACKET_SIZE))
 			OnMinPacketSizeChanged();
+
+		if (GetFocus() == GetDlgItem(IDC_EDIT_TARGET_FPS))
+			OnTargetFPSChanged();
 
 		return TRUE; // still swallow Enter
 	}
@@ -201,6 +206,7 @@ bool CCameraDialog::processStreamParams(const DataBuffer& data, int size)
 	m_colorDepth = data[1];
 	m_skipRows = data[2];
 	m_minPacketSize = (data[3] << 8) + data[4];
+	m_targetFPS = data[5];
 
 	::PostMessage(m_hWnd, WM_UPDATE_DIALOG_DATA_FROM_VARS, 0, 0);
 
@@ -459,6 +465,11 @@ void CCameraDialog::OnSkipRowsChanged()
 void CCameraDialog::OnMinPacketSizeChanged()
 {
 	m_communicator.sendCmdSetMinPacketSize(m_minPacketSize);
+}
+
+void CCameraDialog::OnTargetFPSChanged()
+{
+	m_communicator.sendCmdSetTargetFPS(m_targetFPS);
 }
 
 LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)

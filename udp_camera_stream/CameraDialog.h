@@ -27,6 +27,7 @@ protected:
 	void OnColorDepthValueChanged();
 	void OnSkipRowsChanged();
 	void OnMinPacketSizeChanged();
+	void OnTargetFPSChanged();
 	LRESULT OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/);
 	LRESULT OnUpdateDialogDataFromVars(WPARAM /*wParam*/, LPARAM /*lParam*/);
 
@@ -55,6 +56,7 @@ private:
 	int m_skipRows = 0;
 	RowIndex m_packetSkipRows = 0;
 	int m_minPacketSize = 0;
+	uint8_t m_targetFPS = 0;
 	bool m_bSmoothImage = false;
 
 	std::thread m_thread;
@@ -84,6 +86,7 @@ private:
 private:
 	CComboBox* m_pColorDepthComboBox = nullptr;
 	CEdit* m_pSkipRowsEdit = nullptr;
+	CEdit* m_pTargetFPSEdit = nullptr;
 	CListBox* m_pLogListBox = nullptr;
 	CButton* m_pSmoothCheckBox = nullptr;
 
