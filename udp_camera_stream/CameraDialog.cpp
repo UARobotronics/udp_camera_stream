@@ -36,6 +36,7 @@ BEGIN_MESSAGE_MAP(CCameraDialog, CDialogEx)
 	ON_WM_PAINT()
 	ON_CBN_SELCHANGE(IDC_COMBO_COLOR_DEPTH, &CCameraDialog::OnColorDepthElementChanged)
 	ON_BN_CLICKED(IDC_CHECK_FIRST_FRAME_SMOOTH, &CCameraDialog::OnClickedSmoothImage)
+	ON_BN_CLICKED(IDC_CHECK_REFRESH_FULL_FRAME, &CCameraDialog::OnClickedRefreshFullFrame)
 	ON_MESSAGE(WM_PACKET_RECEIVED, &CCameraDialog::OnPacketReceived)
 	ON_MESSAGE(WM_UPDATE_DIALOG_DATA_FROM_VARS, &CCameraDialog::OnUpdateDialogDataFromVars)
 END_MESSAGE_MAP()
@@ -68,6 +69,8 @@ void CCameraDialog::DoDataExchange(CDataExchange* pDX)
 	DDX_Text(pDX, IDC_EDIT_SKIP_ROWS, m_skipRows);
 	DDX_Text(pDX, IDC_EDIT_MIN_PACKET_SIZE, m_minPacketSize);
 	DDX_Text(pDX, IDC_EDIT_TARGET_FPS, m_targetFPS);
+	DDX_Check(pDX, IDC_CHECK_FIRST_FRAME_SMOOTH, m_bSmoothFirstFrame);
+	DDX_Check(pDX, IDC_CHECK_REFRESH_FULL_FRAME, m_bRefreshFullFrame);
 }
 
 BOOL CCameraDialog::OnInitDialog()
@@ -104,7 +107,6 @@ BOOL CCameraDialog::OnInitDialog()
 	m_pSkipRowsEdit = (CEdit*)GetDlgItem(IDC_EDIT_SKIP_ROWS);
 	m_pTargetFPSEdit = (CEdit*)GetDlgItem(IDC_EDIT_TARGET_FPS);
 	m_pLogListBox = (CListBox*)GetDlgItem(IDC_LIST_LOG);
-	m_pSmoothCheckBox = (CButton*)GetDlgItem(IDC_CHECK_FIRST_FRAME_SMOOTH);
 
 	m_pFPSByFramesEdit = (CEdit*)GetDlgItem(IDC_EDIT_FPS_BY_FRAMES);
 	m_pFPSByRowsEdit = (CEdit*)GetDlgItem(IDC_EDIT_FPS_BY_ROWS);
@@ -354,9 +356,12 @@ void CCameraDialog::onFrameFinished()
 
 	m_currentFrameRowCount = 0;
 
-	CRect dirtyRect(0, 0, m_width, m_height);
-	InvalidateRect(&dirtyRect, FALSE);
-	UpdateWindow();
+	if (m_bRefreshFullFrame)
+	{
+		CRect dirtyRect(0, 0, m_width, m_height);
+		InvalidateRect(&dirtyRect, FALSE);
+		UpdateWindow();
+	}
 }
 
 void CCameraDialog::onMeasurePeriodFinished()
@@ -572,7 +577,7 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 					pixels[pixelShift + G] = luminance;
 					pixels[pixelShift + B] = luminance;
 
-					if (m_bSmoothImage)
+					if (m_bSmoothFirstFrame)
 					{
 						//if ((curFrame + m_curRow) % (skipRows + 1) == 0)
 						if (m_curRow % (m_packetSkipRows + 1) == 0)
@@ -631,8 +636,12 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 		}
 
 		// Invalidate just updated area
-		//CRect dirtyRect(0, minRow - 1, m_width, maxRow + 1);
-		//InvalidateRect(&dirtyRect, FALSE);
+		if (!m_bRefreshFullFrame)
+		{
+			CRect dirtyRect(0, minRow - 1, m_width, maxRow + 1);
+			InvalidateRect(&dirtyRect, FALSE);
+			UpdateWindow();
+		}
 	}
 
 	return 0;
@@ -671,8 +680,8 @@ void CCameraDialog::OnPaint()
 		CPaintDC dc(this);
 
 		// Draw your image
-		if ((HBITMAP)m_image)  // Check if image is loaded
-			m_image.Draw(dc.GetSafeHdc(), 0, 0);  // Draw at position (10, 10)
+		if ((HBITMAP)m_image)
+			m_image.Draw(dc.GetSafeHdc(), 0, 0);
 
 		CDialogEx::OnPaint();
 	}
@@ -680,6 +689,10 @@ void CCameraDialog::OnPaint()
 
 void CCameraDialog::OnClickedSmoothImage()
 {
-	if (m_pSmoothCheckBox)
-		m_bSmoothImage = (m_pSmoothCheckBox->GetCheck() == BST_CHECKED);
+	UpdateData(TRUE);
+}
+
+void CCameraDialog::OnClickedRefreshFullFrame()
+{
+	UpdateData(TRUE);
 }

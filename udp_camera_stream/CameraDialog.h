@@ -33,6 +33,7 @@ protected:
 
 	afx_msg void OnPaint();
 	afx_msg void OnClickedSmoothImage();
+	afx_msg void OnClickedRefreshFullFrame();
 
 	DECLARE_MESSAGE_MAP()
 
@@ -57,7 +58,8 @@ private:
 	RowIndex m_packetSkipRows = 0;
 	int m_minPacketSize = 0;
 	uint8_t m_targetFPS = 0;
-	bool m_bSmoothImage = false;
+	BOOL m_bSmoothFirstFrame = false;
+	BOOL m_bRefreshFullFrame = true;
 
 	std::thread m_thread;
 	Communicator m_communicator;
@@ -88,7 +90,6 @@ private:
 	CEdit* m_pSkipRowsEdit = nullptr;
 	CEdit* m_pTargetFPSEdit = nullptr;
 	CListBox* m_pLogListBox = nullptr;
-	CButton* m_pSmoothCheckBox = nullptr;
 
 	CEdit* m_pFPSByFramesEdit = nullptr;
 	CEdit* m_pFPSByRowsEdit = nullptr;
