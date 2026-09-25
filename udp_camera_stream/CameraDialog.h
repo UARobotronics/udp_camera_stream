@@ -71,6 +71,7 @@ private:
 	int m_width = 0;
 	int m_height = 0;
 	RowIndex m_curRow = 0;
+	CRect m_updateRect{ 0, 0, 0, 0 };
 
 	std::chrono::time_point<std::chrono::system_clock> m_lastPacketTimestamp{};
 	std::chrono::time_point<std::chrono::system_clock> m_startFPSTimestamp{};

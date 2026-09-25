@@ -358,8 +358,8 @@ void CCameraDialog::onFrameFinished()
 
 	if (m_bRefreshFullFrame)
 	{
-		CRect dirtyRect(0, 0, m_width, m_height);
-		InvalidateRect(&dirtyRect, FALSE);
+		m_updateRect = { 0, 0, m_width, m_height };
+		InvalidateRect(&m_updateRect, FALSE);
 		UpdateWindow();
 	}
 }
@@ -638,8 +638,10 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 		// Invalidate just updated area
 		if (!m_bRefreshFullFrame)
 		{
-			CRect dirtyRect(0, minRow - 1, m_width, maxRow + 1);
-			InvalidateRect(&dirtyRect, FALSE);
+			if (minRow <= 0)
+				minRow = 1;
+			m_updateRect = { 0, minRow - 1, m_width, maxRow + 1 };
+			InvalidateRect(&m_updateRect, FALSE);
 			UpdateWindow();
 		}
 	}
@@ -681,7 +683,15 @@ void CCameraDialog::OnPaint()
 
 		// Draw your image
 		if ((HBITMAP)m_image)
-			m_image.Draw(dc.GetSafeHdc(), 0, 0);
+		{
+			//m_image.Draw(dc.GetSafeHdc(), 0, 0);
+
+			m_image.BitBlt(dc.GetSafeHdc(),
+				m_updateRect.left, m_updateRect.top, // Top left of the dst
+				m_updateRect.Width() / 3, m_updateRect.Height(),
+				m_updateRect.left, m_updateRect.top,
+				SRCCOPY);
+		}
 
 		CDialogEx::OnPaint();
 	}
