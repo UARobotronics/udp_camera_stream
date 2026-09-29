@@ -61,7 +61,7 @@ private:
 	BOOL m_bSmoothFirstFrame = false;
 	BOOL m_bRefreshFullFrame = true;
 
-	std::thread m_thread;
+	std::thread m_communicationThread;
 	Communicator m_communicator;
 	DebugInfo debugInfo;
 	State m_state = State::Undefined;

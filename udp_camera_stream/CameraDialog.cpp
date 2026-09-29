@@ -116,8 +116,18 @@ BOOL CCameraDialog::OnInitDialog()
 	m_pPacketProcessTimeEdit = (CEdit*)GetDlgItem(IDC_EDIT_PACKET_PROCESS_TIME);
 
 	// Height is negative to create top-down image
-	m_image.Create(g_defImageWidth, -g_defImageHeight, 24);
+	m_image.Create(g_defImageWidth, -g_defImageHeight, 8);
 
+	// Grayscale image requires to setup palette
+	RGBQUAD colorTable[256];
+	for (int i = 0; i < 256; ++i)
+	{
+		colorTable[i].rgbRed = i;
+		colorTable[i].rgbGreen = i;
+		colorTable[i].rgbBlue = i;
+	}
+
+	m_image.SetColorTable(0, 256, colorTable);
 	m_width = g_defImageWidth;
 	m_height = g_defImageHeight;
 
@@ -218,7 +228,7 @@ bool CCameraDialog::processStreamParams(const DataBuffer& data, int size)
 
 void CCameraDialog::startWorkerThread()
 {
-	m_thread = std::thread(&CCameraDialog::processCommunication, this);
+	m_communicationThread = std::thread(&CCameraDialog::processCommunication, this);
 }
 
 void CCameraDialog::processCommunication()
@@ -584,11 +594,8 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 				luminance = (float)(luminance) / maxLuminance * 255;
 				for (int i = 0; i < count; ++i)
 				{
-					size_t pixelShift = rowShift + curCol * 3;
-
-					pixels[pixelShift + R] = luminance;
-					pixels[pixelShift + G] = luminance;
-					pixels[pixelShift + B] = luminance;
+					size_t pixelShift = rowShift + curCol;
+					pixels[pixelShift] = luminance;
 
 					if (m_bSmoothFirstFrame)
 					{
@@ -605,7 +612,7 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 								{
 									uint16_t prevRow = m_curRow - m_packetSkipRows - 1;
 									size_t prevPixelInd = pixelShift - (m_packetSkipRows + 1) /*row*/ * pitch;
-									uint8_t prevLuminance = pixels[prevPixelInd + R];
+									uint8_t prevLuminance = pixels[prevPixelInd];
 
 									for (int i = 1; i < m_packetSkipRows + 1; ++i)
 									{
@@ -613,9 +620,7 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 										size_t blendPixelInd = pixelShift - i /*row*/ * pitch;
 										uint16_t blendLuminance = ((m_packetSkipRows + 1 - i) * luminance + i * prevLuminance) / (m_packetSkipRows + 1);
 
-										pixels[blendPixelInd + R] = blendLuminance;
-										pixels[blendPixelInd + G] = blendLuminance;
-										pixels[blendPixelInd + B] = blendLuminance;
+										pixels[blendPixelInd] = blendLuminance;
 									}
 								}
 
