@@ -5,7 +5,6 @@
 #define IDD_CAMERA_DIALOG               101
 #define IDR_MAINFRAME                   128
 #define IDR_udpcamerastreamTYPE         130
-#define IDC_LIST1                       1000
 #define IDC_LIST_LOG                    1000
 #define IDC_SPIN_COLOR_DEPTH            1001
 #define IDC_EDIT_SKIP_ROWS              1002
@@ -31,6 +30,8 @@
 #define IDC_EDIT_TARGET_FPS             1022
 #define IDC_STATIC_TARGET_FPS           1023
 #define IDC_CHECK_REFRESH_FULL_FRAME    1024
+#define IDC_EDIT_PACKET_PROCESS_TIME    1025
+#define IDC_STATIC_PACKET_PROCESS_TIME  1026
 
 // Next default values for new objects
 // 
@@ -38,7 +39,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        311
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         1025
+#define _APS_NEXT_CONTROL_VALUE         1027
 #define _APS_NEXT_SYMED_VALUE           310
 #endif
 #endif

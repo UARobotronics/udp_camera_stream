@@ -113,6 +113,7 @@ BOOL CCameraDialog::OnInitDialog()
 	m_pDataRateEdit = (CEdit*)GetDlgItem(IDC_EDIT_DATARATE);
 	m_pFullDataRateEdit = (CEdit*)GetDlgItem(IDC_EDIT_FULL_DATARATE);
 	m_pDataLossEdit = (CEdit*)GetDlgItem(IDC_EDIT_DATA_LOSS);
+	m_pPacketProcessTimeEdit = (CEdit*)GetDlgItem(IDC_EDIT_PACKET_PROCESS_TIME);
 
 	// Height is negative to create top-down image
 	m_image.Create(g_defImageWidth, -g_defImageHeight, 24);
@@ -407,12 +408,21 @@ void CCameraDialog::onMeasurePeriodFinished()
 		m_pDataLossEdit->SetWindowTextW(str);
 	}
 
+	if (m_pPacketProcessTimeEdit && (m_periodPacketCount > 0))
+	{
+		unsigned long long averageMicros = m_packetProcessMicros / m_periodPacketCount;
+		str.Format(_T("%llu"), averageMicros);
+		m_pPacketProcessTimeEdit->SetWindowTextW(str);
+	}
+
 	m_startFPSTimestamp = now;
 	m_frameCount = 0;
 	m_FPSTotalRowCount = 0;
 	m_wholeFramesRowCount = 0;
 	m_dataBitsCount = 0;
 	m_fullDataBitsCount = 0;
+	m_periodPacketCount = 0;
+	m_packetProcessMicros = 0;
 }
 
 bool CCameraDialog::parsePacketHeader(const DataBuffer& data, FrameIndex& frame, RowIndex& row, uint8_t& flags, RowIndex& skipRows, uint8_t& colorDepth)
@@ -504,9 +514,12 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 			dataQueue.pop();
 			size_t dataSize = data.size();
 
+			auto packetProcessStart = std::chrono::system_clock::now();
+
 			unsigned int newImageBitsCount = (dataSize - g_dataHeaderSize) * 8;
 			m_dataBitsCount += newImageBitsCount;
-			m_fullDataBitsCount += newImageBitsCount + g_packetHeaderSize * 8;
+			m_fullDataBitsCount += (dataSize + g_packetHeaderSize) * 8;
+			++m_periodPacketCount;
 
 			if (data.size() < m_minPacketSize)
 				continue;
@@ -633,6 +646,10 @@ LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
 			// treated as finished, so process its finishing here.
 			if (curCol > 0)
 				onRowFinished(m_packetSkipRows + 1, &minRow, &maxRow);
+
+			auto now = std::chrono::system_clock::now();
+			auto duration = std::chrono::duration_cast<std::chrono::microseconds>(now - packetProcessStart).count();
+			m_packetProcessMicros += duration;
 		}
 
 		// Invalidate just updated area

@@ -85,6 +85,8 @@ private:
 	unsigned int m_currentFrameRowCount = 0;
 	unsigned int m_dataBitsCount = 0;
 	unsigned int m_fullDataBitsCount = 0;
+	unsigned int m_periodPacketCount = 0;
+	unsigned long long m_packetProcessMicros = 0;
 
 private:
 	CComboBox* m_pColorDepthComboBox = nullptr;
@@ -97,4 +99,5 @@ private:
 	CEdit* m_pDataRateEdit = nullptr;
 	CEdit* m_pFullDataRateEdit = nullptr;
 	CEdit* m_pDataLossEdit = nullptr;
+	CEdit* m_pPacketProcessTimeEdit = nullptr;
 };
