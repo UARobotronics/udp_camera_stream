@@ -688,7 +688,7 @@ void CCameraDialog::OnPaint()
 
 			m_image.BitBlt(dc.GetSafeHdc(),
 				m_updateRect.left, m_updateRect.top, // Top left of the dst
-				m_updateRect.Width() / 3, m_updateRect.Height(),
+				m_updateRect.Width(), m_updateRect.Height(),
 				m_updateRect.left, m_updateRect.top,
 				SRCCOPY);
 		}
