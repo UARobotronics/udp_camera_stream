@@ -8,7 +8,6 @@
 #include "CameraDialog.h"
 #include "udp_camera_stream.h"
 
-constexpr UINT WM_PACKET_RECEIVED = WM_APP + 1;
 constexpr UINT WM_UPDATE_DIALOG_DATA_FROM_VARS = WM_APP + 2;
 
 const unsigned int R = 2;
@@ -28,6 +27,7 @@ const size_t g_DebugInfoReserve = 50000;
 //const std::string g_dstAddress = "192.168.50.122"; // Direct server IP
 //const std::string g_dstAddress = "10.99.9.122";
 const std::string g_dstAddress = "192.168.50.237"; // Mikrotik IP
+//const std::string g_dstAddress = "143.105.42.214"; // Starlink IP
 const unsigned int g_dstPort = 6666;
 
 using namespace std::chrono_literals;
@@ -37,7 +37,6 @@ BEGIN_MESSAGE_MAP(CCameraDialog, CDialogEx)
 	ON_CBN_SELCHANGE(IDC_COMBO_COLOR_DEPTH, &CCameraDialog::OnColorDepthElementChanged)
 	ON_BN_CLICKED(IDC_CHECK_FIRST_FRAME_SMOOTH, &CCameraDialog::OnClickedSmoothImage)
 	ON_BN_CLICKED(IDC_CHECK_REFRESH_FULL_FRAME, &CCameraDialog::OnClickedRefreshFullFrame)
-	ON_MESSAGE(WM_PACKET_RECEIVED, &CCameraDialog::OnPacketReceived)
 	ON_MESSAGE(WM_UPDATE_DIALOG_DATA_FROM_VARS, &CCameraDialog::OnUpdateDialogDataFromVars)
 END_MESSAGE_MAP()
 
@@ -229,6 +228,7 @@ bool CCameraDialog::processStreamParams(const DataBuffer& data, int size)
 void CCameraDialog::startWorkerThread()
 {
 	m_communicationThread = std::thread(&CCameraDialog::processCommunication, this);
+	m_processingThread = std::thread(&CCameraDialog::processPackets, this);
 }
 
 void CCameraDialog::processCommunication()
@@ -311,9 +311,6 @@ void CCameraDialog::processCommunication()
 					std::lock_guard<std::mutex> lock(m_queueMutex);
 					m_frameQueue.push(std::move(packet));
 				}
-				// notify UI thread that a frame (or packet) is ready
-				if (m_hWnd)
-					::PostMessage(m_hWnd, WM_PACKET_RECEIVED, 0, 0);
 
 				++packetCount;
 
@@ -324,6 +321,185 @@ void CCameraDialog::processCommunication()
 	catch (...)
 	{
 		return;
+	}
+}
+
+void CCameraDialog::processPackets()
+{
+	while (true)
+	{
+		auto now = std::chrono::system_clock::now();
+
+		m_lastPacketTimestamp = now;
+		auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_startFPSTimestamp).count();
+
+		if (duration > 1000)
+			onMeasurePeriodFinished();
+
+		if (m_frameQueue.empty())
+			continue;
+
+		std::queue<DataBuffer> dataQueue;
+		{
+			std::lock_guard<std::mutex> lock(m_queueMutex);
+			std::swap(m_frameQueue, dataQueue);
+		}
+
+		BYTE* pixels = (BYTE*)m_image.GetBits();
+		if (pixels)
+		{
+			int maxRow = -1;
+			int minRow = std::numeric_limits<int>::max();
+
+			while (!dataQueue.empty())
+			{
+				DataBuffer data = dataQueue.front();
+				dataQueue.pop();
+				size_t dataSize = data.size();
+
+				auto packetProcessStart = std::chrono::system_clock::now();
+
+				unsigned int newImageBitsCount = (dataSize - g_dataHeaderSize) * 8;
+				m_dataBitsCount += newImageBitsCount;
+				m_fullDataBitsCount += (dataSize + g_packetHeaderSize) * 8;
+				++m_periodPacketCount;
+
+				if (data.size() < m_minPacketSize)
+					continue;
+
+				int width = m_image.GetWidth();
+				int height = m_image.GetHeight();
+				int pitch = m_image.GetPitch();
+
+				uint8_t flags;
+				uint8_t colorDepth;
+				FrameIndex curFrame;
+
+				static RowIndex prevRow = 0;
+				static FrameIndex prevCurFrame = 0;
+				RowIndex frameCurRow;
+				if (!parsePacketHeader(data, curFrame, frameCurRow, flags, m_packetSkipRows, colorDepth))
+					continue;
+
+				if ((frameCurRow < m_curRow) && (m_curRow - frameCurRow > m_height / 2))
+					onFrameFinished();
+
+				m_curRow = frameCurRow;
+
+				if ((m_curRow > 0) && (prevRow != m_curRow - 1))
+				{
+					CString strRows;
+					strRows.Format(_T("Rows skipped! Frame: %d, Cur row: %d, prev row: %d"), curFrame, m_curRow, prevRow);
+					//addLogString(strRows);
+				}
+
+				bool skip = false;
+				if ((prevCurFrame > curFrame) && (prevCurFrame - curFrame < 500))
+					skip = true;
+
+				//if (m_curRow < prevRow)
+				//	onFrameFinished();
+
+				if (skip)
+					continue;
+
+				if (m_curRow >= m_height)
+					continue;
+
+				prevRow = m_curRow;
+				prevCurFrame = curFrame;
+
+				size_t rowShift = m_curRow * pitch;
+				size_t curCol = 0;
+				int rowPixels = 0;
+
+				int colorSmooth = 1 << colorDepth;
+				int maxLuminance = 256 - colorSmooth;
+
+				for (size_t dataInd = g_dataHeaderSize; dataInd < dataSize; dataInd += 1)
+				{
+					uint8_t dataByte = data[dataInd];
+
+					// Compress several adjacent pixels into one color value
+					int count = (dataByte % colorSmooth) + 1;
+					rowPixels += count;
+					uint8_t luminance = dataByte - (dataByte % colorSmooth);
+					luminance = (float)(luminance) / maxLuminance * 255;
+					for (int i = 0; i < count; ++i)
+					{
+						size_t pixelShift = rowShift + curCol;
+						pixels[pixelShift] = luminance;
+
+						if (m_bSmoothFirstFrame)
+						{
+							//if ((curFrame + m_curRow) % (skipRows + 1) == 0)
+							if (m_curRow % (m_packetSkipRows + 1) == 0)
+							{
+								switch (m_packetSkipRows)
+								{
+								case 1:
+								case 2:
+								case 3:
+								case 4:
+									if ((m_curRow > 0) && (m_curRow < m_height) && (curCol > 1) && (curCol < m_width - 2))
+									{
+										uint16_t prevRow = m_curRow - m_packetSkipRows - 1;
+										size_t prevPixelInd = pixelShift - (m_packetSkipRows + 1) /*row*/ * pitch;
+										uint8_t prevLuminance = pixels[prevPixelInd];
+
+										for (int i = 1; i < m_packetSkipRows + 1; ++i)
+										{
+											//size_t blendPixelInd = pixelShift - 1 /*row*/ * pitch - 1 /*column*/ * 3;
+											size_t blendPixelInd = pixelShift - i /*row*/ * pitch;
+											uint16_t blendLuminance = ((m_packetSkipRows + 1 - i) * luminance + i * prevLuminance) / (m_packetSkipRows + 1);
+
+											pixels[blendPixelInd] = blendLuminance;
+										}
+									}
+
+									break;
+								default:
+									break;
+								}
+							}
+						}
+
+						++curCol;
+
+						if (curCol >= m_width)
+						{
+							rowPixels = 0;
+							curCol = 0;
+
+							onRowFinished(m_packetSkipRows + 1, &minRow, &maxRow);
+							rowShift = m_curRow * pitch;
+
+							if (g_addDebugInfo)
+								debugInfo.packetData.emplace_back(curFrame, m_curRow);
+						}
+					}
+				}
+
+				// In case if part of row data was lost, in the loop above it won't be
+				// treated as finished, so process its finishing here.
+				if (curCol > 0)
+					onRowFinished(m_packetSkipRows + 1, &minRow, &maxRow);
+
+				auto now = std::chrono::system_clock::now();
+				auto duration = std::chrono::duration_cast<std::chrono::microseconds>(now - packetProcessStart).count();
+				m_packetProcessMicros += duration;
+			}
+
+			// Invalidate just updated area
+			if (!m_bRefreshFullFrame)
+			{
+				if (minRow <= 0)
+					minRow = 1;
+				m_updateRect = { 0, minRow - 1, m_width, maxRow + 1 };
+				InvalidateRect(&m_updateRect, FALSE);
+				UpdateWindow();
+			}
+		}
 	}
 }
 
@@ -495,180 +671,6 @@ void CCameraDialog::OnMinPacketSizeChanged()
 void CCameraDialog::OnTargetFPSChanged()
 {
 	m_communicator.sendCmdSetTargetFPS(m_targetFPS);
-}
-
-LRESULT CCameraDialog::OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/)
-{
-	auto now = std::chrono::system_clock::now();
-
-	m_lastPacketTimestamp = now;
-	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_startFPSTimestamp).count();
-
-	if (duration > 1000)
-		onMeasurePeriodFinished();
-
-	std::queue<DataBuffer> dataQueue;
-	{
-		std::lock_guard<std::mutex> lock(m_queueMutex);
-		std::swap(m_frameQueue, dataQueue);
-	}
-
-	BYTE* pixels = (BYTE*)m_image.GetBits();
-	if (pixels)
-	{
-		int maxRow = -1;
-		int minRow = std::numeric_limits<int>::max();
-		while (!dataQueue.empty())
-		{
-			DataBuffer data = dataQueue.front();
-			dataQueue.pop();
-			size_t dataSize = data.size();
-
-			auto packetProcessStart = std::chrono::system_clock::now();
-
-			unsigned int newImageBitsCount = (dataSize - g_dataHeaderSize) * 8;
-			m_dataBitsCount += newImageBitsCount;
-			m_fullDataBitsCount += (dataSize + g_packetHeaderSize) * 8;
-			++m_periodPacketCount;
-
-			if (data.size() < m_minPacketSize)
-				continue;
-
-			int width = m_image.GetWidth();
-			int height = m_image.GetHeight();
-			int pitch = m_image.GetPitch();
-
-			uint8_t flags;
-			uint8_t colorDepth;
-			FrameIndex curFrame;
-
-			static RowIndex prevRow = 0;
-			static FrameIndex prevCurFrame = 0;
-			RowIndex frameCurRow;
-			if (!parsePacketHeader(data, curFrame, frameCurRow, flags, m_packetSkipRows, colorDepth))
-				continue;
-
-			if ((frameCurRow < m_curRow) && (m_curRow - frameCurRow > m_height / 2))
-				onFrameFinished();
-
-			m_curRow = frameCurRow;
-
-			if ((m_curRow > 0) && (prevRow != m_curRow - 1))
-			{
-				CString strRows;
-				strRows.Format(_T("Rows skipped! Frame: %d, Cur row: %d, prev row: %d"), curFrame, m_curRow, prevRow);
-				//addLogString(strRows);
-			}
-
-			bool skip = false;
-			if ((prevCurFrame > curFrame) && (prevCurFrame - curFrame < 500))
-				skip = true;
-
-			//if (m_curRow < prevRow)
-			//	onFrameFinished();
-
-			if (skip)
-				continue;
-
-			if (m_curRow >= m_height)
-				continue;
-
-			prevRow = m_curRow;
-			prevCurFrame = curFrame;
-
-			size_t rowShift = m_curRow * pitch;
-			size_t curCol = 0;
-			int rowPixels = 0;
-
-			int colorSmooth = 1 << colorDepth;
-			int maxLuminance = 256 - colorSmooth;
-
-			for (size_t dataInd = g_dataHeaderSize; dataInd < dataSize; dataInd += 1)
-			{
-				uint8_t dataByte = data[dataInd];
-
-				// Compress several adjacent pixels into one color value
-				int count = (dataByte % colorSmooth) + 1;
-				rowPixels += count;
-				uint8_t luminance = dataByte - (dataByte % colorSmooth);
-				luminance = (float)(luminance) / maxLuminance * 255;
-				for (int i = 0; i < count; ++i)
-				{
-					size_t pixelShift = rowShift + curCol;
-					pixels[pixelShift] = luminance;
-
-					if (m_bSmoothFirstFrame)
-					{
-						//if ((curFrame + m_curRow) % (skipRows + 1) == 0)
-						if (m_curRow % (m_packetSkipRows + 1) == 0)
-						{
-							switch (m_packetSkipRows)
-							{
-							case 1:
-							case 2:
-							case 3:
-							case 4:
-								if ((m_curRow > 0) && (m_curRow < m_height) && (curCol > 1) && (curCol < m_width - 2))
-								{
-									uint16_t prevRow = m_curRow - m_packetSkipRows - 1;
-									size_t prevPixelInd = pixelShift - (m_packetSkipRows + 1) /*row*/ * pitch;
-									uint8_t prevLuminance = pixels[prevPixelInd];
-
-									for (int i = 1; i < m_packetSkipRows + 1; ++i)
-									{
-										//size_t blendPixelInd = pixelShift - 1 /*row*/ * pitch - 1 /*column*/ * 3;
-										size_t blendPixelInd = pixelShift - i /*row*/ * pitch;
-										uint16_t blendLuminance = ((m_packetSkipRows + 1 - i) * luminance + i * prevLuminance) / (m_packetSkipRows + 1);
-
-										pixels[blendPixelInd] = blendLuminance;
-									}
-								}
-
-								break;
-							default:
-								break;
-							}
-						}
-					}
-
-					++curCol;
-
-					if (curCol >= m_width)
-					{
-						rowPixels = 0;
-						curCol = 0;
-
-						onRowFinished(m_packetSkipRows + 1, &minRow, &maxRow);
-						rowShift = m_curRow * pitch;
-
-						if (g_addDebugInfo)
-							debugInfo.packetData.emplace_back(curFrame, m_curRow);
-					}
-				}
-			}
-
-			// In case if part of row data was lost, in the loop above it won't be
-			// treated as finished, so process its finishing here.
-			if (curCol > 0)
-				onRowFinished(m_packetSkipRows + 1, &minRow, &maxRow);
-
-			auto now = std::chrono::system_clock::now();
-			auto duration = std::chrono::duration_cast<std::chrono::microseconds>(now - packetProcessStart).count();
-			m_packetProcessMicros += duration;
-		}
-
-		// Invalidate just updated area
-		if (!m_bRefreshFullFrame)
-		{
-			if (minRow <= 0)
-				minRow = 1;
-			m_updateRect = { 0, minRow - 1, m_width, maxRow + 1 };
-			InvalidateRect(&m_updateRect, FALSE);
-			UpdateWindow();
-		}
-	}
-
-	return 0;
 }
 
 LRESULT CCameraDialog::OnUpdateDialogDataFromVars(WPARAM /*wParam*/, LPARAM /*lParam*/)

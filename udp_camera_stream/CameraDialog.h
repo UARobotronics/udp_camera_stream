@@ -28,7 +28,6 @@ protected:
 	void OnSkipRowsChanged();
 	void OnMinPacketSizeChanged();
 	void OnTargetFPSChanged();
-	LRESULT OnPacketReceived(WPARAM /*wParam*/, LPARAM /*lParam*/);
 	LRESULT OnUpdateDialogDataFromVars(WPARAM /*wParam*/, LPARAM /*lParam*/);
 
 	afx_msg void OnPaint();
@@ -44,6 +43,7 @@ protected:
 	bool processStreamParams(const DataBuffer& data, int size);
 	void startWorkerThread();
 	void processCommunication();
+	void processPackets();
 	void addLogString(CString str);
 	void updateMinMaxRow(int* minRow, int* maxRow);
 	void onRowFinished(int increment, int* minRow, int* maxRow);
@@ -62,6 +62,7 @@ private:
 	BOOL m_bRefreshFullFrame = true;
 
 	std::thread m_communicationThread;
+	std::thread m_processingThread;
 	Communicator m_communicator;
 	DebugInfo debugInfo;
 	State m_state = State::Undefined;
